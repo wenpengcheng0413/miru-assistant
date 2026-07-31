@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=75.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "miru-assistant"
+version = "1.0.0"
+description = "Miru Assistant — 你的 AI 微信秘书。自动总结微信群消息，生成日报推送到手机。"
+authors = [{name = "Miru Team"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+]
+
+dependencies = [
+    "openai>=1.0.0",               # DeepSeek API (OpenAI SDK compatible)
+    "apscheduler>=3.11,<4.0",      # 定时调度
+    "loguru>=0.7.0",               # 日志
+    "typer>=0.9.0",                # CLI
+    "jinja2>=3.1.0",               # 模板引擎 (Prompt + 日报)
+    "pydantic>=2.0.0",             # 数据校验
+    "pyyaml>=6.0",                 # YAML 配置
+    "httpx>=0.25.0",               # HTTP 客户端 (PushPlus API)
+    "pymem>=1.0",                  # 微信进程内存读取
+    "psutil>=5.9.0",               # 进程检测
+    "pycryptodome>=3.20.0",        # AES 解密
+    "zstandard>=0.22.0",           # 消息内容解压
+    "rich>=13.0.0",                # 终端美化输出
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[project.scripts]
+miru = "miru.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/miru-team/miru-assistant"
+Documentation = "https://github.com/miru-team/miru-assistant/blob/main/README.md"
+Repository = "https://github.com/miru-team/miru-assistant"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "C4"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

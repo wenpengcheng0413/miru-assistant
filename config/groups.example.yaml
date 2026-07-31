@@ -1,0 +1,15 @@
+# Miru Assistant — 群组配置
+# 将此文件中的群名修改为你关注的微信群名称（必须与微信中显示的群名一致）
+# 支持精确匹配和模糊匹配（包含关系）
+
+groups:
+  - name: "21级环境工程班群"
+    alias: "班群"
+  - name: "环境工程课程群"
+    alias: "课程群"
+  - name: "实验课群"
+    alias: "实验群"
+  - name: "AI交流群"
+    alias: "AI群"
+  - name: "ComfyUI交流群"
+    alias: "ComfyUI群"

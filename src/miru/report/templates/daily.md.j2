@@ -1,0 +1,67 @@
+{# Miru Assistant — 日报 Markdown 模板 #}
+{# 变量: date, generated_at, groups_covered, message_count,
+          urgent_items, deadline_items, notice_items, file_items,
+          summaries, ai_suggestion, failed_groups #}
+
+# 📋 Miru 日报
+
+**{{ date }}**
+
+{% if failed_groups %}
+> ⚠️ 以下群分析失败，已跳过：{{ failed_groups }}
+{% endif %}
+
+---
+
+{% if urgent_items %}
+## 🔴 需要处理
+
+{% for item in urgent_items %}
+- **{{ item.content }}**
+  └─ 来源：{{ item.source_group }}{% if item.source_sender %} · {{ item.source_sender }}{% endif %}{% if item.deadline %} · ⏰ {{ item.deadline }}{% endif %}
+{% endfor %}
+
+{% endif %}
+{% if deadline_items %}
+## ⏰ 截止日期
+
+{% for item in deadline_items %}
+- **{{ item.content }}**
+  └─ 📅 {{ item.date }} · 来源：{{ item.source_group }}{% if item.source_sender %} · {{ item.source_sender }}{% endif %}
+{% endfor %}
+
+{% endif %}
+{% if notice_items %}
+## 📢 今日通知
+
+{% for item in notice_items %}
+- **{{ item.content }}**
+  └─ 来源：{{ item.source_group }}{% if item.source_sender %} · {{ item.source_sender }}{% endif %}
+{% endfor %}
+
+{% endif %}
+{% if file_items %}
+## 📂 文件资料
+
+{% for item in file_items %}
+- **{{ item.content }}**
+  └─ 来源：{{ item.source_group }}{% if item.source_sender %} · {{ item.source_sender }}{% endif %}
+{% endfor %}
+
+{% endif %}
+{% if summaries %}
+## 💬 群聊摘要
+
+{% for s in summaries %}
+- **{{ s.group }}**：{{ s.text }}
+{% endfor %}
+
+{% endif %}
+## 🤖 AI 提醒
+
+> {{ ai_suggestion }}
+
+---
+
+> 📊 覆盖 {{ groups_covered }} 个群 · 处理 {{ message_count }} 条消息
+> 🤖 由 Miru Assistant 自动生成 · {{ generated_at }}

@@ -1,0 +1,39 @@
+# ============================================================
+# Miru Assistant — .gitignore
+# 敏感信息与运行时数据一律不上传，保持本地。
+# ============================================================
+
+# === 敏感配置（含真实 API Key / Token / 微信数据库密钥）===
+# 只上传 settings.example.yaml（占位符版本）
+config/settings.yaml
+
+# === 运行时数据（微信聊天消息库、日志、密钥文件、备份）===
+data/
+chatlog/
+backup/
+
+# === 隐私文档（真实微信群名 + 群 ID 清单）===
+docs/wechat_groups_report.md
+docs/wechat_real_groups_report.md
+
+# === 第三方二进制工具（微信密钥提取工具等，不上传）===
+tools/
+
+# === Python 虚拟环境 ===
+venv/
+
+# === 缓存 / 构建产物 ===
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# === 系统 / 编辑器文件 ===
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

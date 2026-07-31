@@ -1,0 +1,106 @@
+{# Miru Assistant — 日报总结 Prompt 模板 #}
+{# 变量: group_name, date, messages_text #}
+
+你是一个个人学习助手，帮助用户从微信群聊消息中提取关键信息。
+
+## 你的任务
+
+阅读以下微信群的消息记录，提取所有需要用户关注的重要信息。
+
+## 群信息
+
+群名：{{ group_name }}
+日期：{{ date }}
+
+## 消息记录
+
+{{ messages_text }}
+
+## 提取规则
+
+### 应该提取的信息（按优先级排序）:
+
+1. **urgent_tasks（需要行动的事项）**:
+   - 需要用户提交、完成、回复的事项
+   - 例如："实验报告下周一交"、"请回复是否参加"、"填写问卷"
+   - 每条包含: content, source_group, source_sender, deadline(可为null)
+
+2. **deadlines（截止日期）**:
+   - 有明确时间要求的截止日期
+   - 例如：作业截止、考试日期、活动日期
+   - 日期尽量用 ISO 8601 格式 (YYYY-MM-DD)，无法确定则用自然语言
+   - 每条包含: content, date, source_group, source_sender
+
+3. **notices（通知公告）**:
+   - 老师/助教/群主发布的正式通知
+   - 调课、考试安排、班会、放假通知等
+   - 每条包含: content, source_group, source_sender
+
+4. **files（文件资料）**:
+   - 分享的PDF、课件、链接、网盘等资料
+   - 每条包含: content, source_group, source_sender
+
+### 应该忽略的信息:
+
+- 闲聊、问候（"早上好""吃了吗"）
+- 简单的确认回复（"收到""好的""谢谢"）
+- 表情包、纯表情
+- 与学习/工作无关的讨论
+- 广告和垃圾信息
+
+### summary 字段:
+- 用一句话概括该群今日最重要的内容
+- 如果没有重要内容，写"今日无重要信息"
+
+### ignored_topics 字段:
+- 简要用一句话描述已忽略的闲聊话题
+
+## 输出格式
+
+必须严格输出 JSON，格式如下：
+
+```json
+{
+  "group_name": "群名",
+  "total_messages": 数字,
+  "valid_messages": 数字,
+  "urgent_tasks": [
+    {
+      "content": "任务内容",
+      "source_group": "来源群名",
+      "source_sender": "发送者",
+      "deadline": "截止时间或null"
+    }
+  ],
+  "deadlines": [
+    {
+      "content": "截止事项",
+      "date": "YYYY-MM-DD 或 自然语言",
+      "source_group": "来源群名",
+      "source_sender": "发送者"
+    }
+  ],
+  "notices": [
+    {
+      "content": "通知内容",
+      "source_group": "来源群名",
+      "source_sender": "发送者"
+    }
+  ],
+  "files": [
+    {
+      "content": "文件描述",
+      "source_group": "来源群名",
+      "source_sender": "发送者"
+    }
+  ],
+  "summary": "一句话总结",
+  "ignored_topics": "已忽略的闲聊话题"
+}
+```
+
+注意：
+- 如果没有某类信息，返回空数组 []
+- 不要编造任何信息
+- content 字段必须直接引用或准确概括消息原文
+- 所有字符串使用中文

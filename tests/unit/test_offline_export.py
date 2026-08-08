@@ -329,6 +329,17 @@ class TestFullExporter:
         assert "哈喽" in chat
         assert "睡了吗" in chat
 
+    def test_header_not_duplicated(self, wx_account: Path, tmp_path: Path):
+        """文件头只出现一次（防止隐式字符串拼接导致头部重复 60 次）。"""
+        exporter = ContactFullExporter(wx_account)
+        result = exporter.export(CONTACT_NAME, output_dir=tmp_path / "output")
+        chat, raw = _export_dir_texts(result)
+        # 头部块整体只出现 1 次: "="*60 首尾各一次，共 2 处
+        assert chat.count("联系人：") == 1
+        assert chat.count("=" * 60) == 2
+        assert raw.count("联系人：") == 1
+        assert raw.count("=" * 60) == 2
+
     def test_sender_counts(self, wx_account: Path, tmp_path: Path):
         """sender 统计: 我 vs Krista。"""
         exporter = ContactFullExporter(wx_account)

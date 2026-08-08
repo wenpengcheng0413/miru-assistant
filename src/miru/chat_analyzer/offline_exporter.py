@@ -166,14 +166,20 @@ class ContactFullExporter:
 
     @staticmethod
     def _header(display_name: str, total: int, export_time: str) -> str:
-        """文件头（与 exporter.py render_export_file 格式兼容）。"""
-        return (
-            "=" * 60 + "\n"
-            f"联系人：{display_name}\n"
-            f"导出时间：{export_time}\n"
-            f"消息数量：{total}\n"
-            "=" * 60 + "\n"
-        )
+        """文件头（与 exporter.py render_export_file 格式兼容）。
+
+        注意: 不要用相邻字符串字面量拼接（"\n" + f-string + "=" 会被
+        Python 编译期隐式拼接后整体乘算，导致头部重复）。
+        """
+        return "\n".join(
+            [
+                "=" * 60,
+                f"联系人：{display_name}",
+                f"导出时间：{export_time}",
+                f"消息数量：{total}",
+                "=" * 60,
+            ]
+        ) + "\n"
 
     @staticmethod
     def _render(

@@ -12,6 +12,9 @@ data/
 chatlog/
 backup/
 
+# === Chat Analyzer 输出（真实聊天记录 / AI 分析报告，隐私）===
+output/
+
 # === 隐私文档（真实微信群名 + 群 ID 清单）===
 docs/wechat_groups_report.md
 docs/wechat_real_groups_report.md

@@ -13,6 +13,8 @@ from loguru import logger
 from openai import OpenAI
 
 from miru.llm.schemas import (
+    ChatAnalysis,
+    ChatAnalysisResult,
     GroupAnalysis,
     LLMCallResult,
     TokenUsage,
@@ -546,6 +548,255 @@ class DeepSeekClient:
             result = self.analyze_group(group_name, text, date_str)
             results.append(result)
         return results
+
+    # ================================================================
+    # Chat Analysis (Chat Analyzer V2 — 联系人聊天分析)
+    # 与 analyze_group() 完全独立。不修改任何日报逻辑。
+    # ================================================================
+
+    def render_chat_system_prompt(self) -> str:
+        """渲染 chat analysis system role prompt（不含消息内容，可被 API cache）。"""
+        return (
+            "你是一个专业的个人聊天记录分析助手。"
+            "你的任务是分析微信对话记录中的沟通模式、主要话题、情感基调与人际关系。"
+            "你必须严格按照 JSON 格式输出结果。"
+        )
+
+    def render_chat_user_prompt(
+        self,
+        contact_name: str,
+        messages_text: str,
+    ) -> str:
+        """渲染 chat analysis user role prompt（包含实际聊天内容）。"""
+        template = self._jinja.get_template("chat_analysis.j2")
+        return template.render(
+            contact_name=contact_name,
+            messages_text=messages_text,
+        )
+
+    def analyze_chat(
+        self,
+        contact_name: str,
+        messages_text: str,
+    ) -> ChatAnalysisResult:
+        """
+        对单个联系人的聊天记录进行分析。
+
+        内置自适应重试 (与 analyze_group 相同策略):
+            - TokenBudgetExceededError → 增大 max_tokens 重试
+            - EmptyResponseError        → 确保 thinking disabled 重试
+            - JSON Parse Error     → 降低 temperature 重试
+
+        Args:
+            contact_name: 联系人名称。
+            messages_text: 格式化后的聊天记录文本。
+
+        Returns:
+            ChatAnalysisResult — 含分析结果、token 用量、耗时。
+        """
+        import time as _time
+
+        start = _time.time()
+        result = ChatAnalysisResult(contact_name=contact_name)
+
+        system_prompt = self.render_chat_system_prompt()
+        user_prompt = self.render_chat_user_prompt(contact_name, messages_text)
+
+        # ---- Prompt 长度保护 ----
+        prompt_chars = len(system_prompt) + len(user_prompt)
+        if prompt_chars > PROMPT_CHAR_LIMIT:
+            logger.warning(
+                f"[{contact_name}] Prompt 过长 ({prompt_chars} chars, "
+                f"≈ {prompt_chars // 4} tokens)，跳过分析"
+            )
+            result.error = f"Prompt too long: {prompt_chars} chars"
+            result.duration_ms = int((_time.time() - start) * 1000)
+            return result
+
+        # ---- 自适应重试参数 ----
+        current_max_tokens = self.max_tokens
+        current_temperature = self.temperature
+        thinking_disabled = True  # 默认关闭 thinking
+
+        for attempt in range(self.max_retries + 1):
+            # ---- 构建 extra_body ----
+            extra_body: dict[str, Any] = {}
+            if thinking_disabled:
+                extra_body["thinking"] = {"type": "disabled"}
+
+            try:
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=current_temperature,
+                    max_tokens=current_max_tokens,
+                    response_format={"type": "json_object"},
+                    extra_body=extra_body if extra_body else None,
+                )
+            except Exception as e:
+                error_msg = str(e)
+
+                # thinking 参数不支持 → 回退
+                if "thinking" in error_msg.lower():
+                    logger.info(f"[{contact_name}] 模型不支持 thinking 参数，回退普通请求")
+                    thinking_disabled = False
+                    extra_body = {}
+                    try:
+                        response = self._client.chat.completions.create(
+                            model=self.model,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            temperature=current_temperature,
+                            max_tokens=current_max_tokens,
+                            response_format={"type": "json_object"},
+                        )
+                    except Exception as e2:
+                        result.error = str(e2)
+                        result.retry_count = attempt
+                        result.duration_ms = int((_time.time() - start) * 1000)
+                        return result
+                else:
+                    # 网络/服务端错误 → 可重试
+                    is_retryable = any(
+                        kw in error_msg.lower()
+                        for kw in (
+                            "timeout",
+                            "rate",
+                            "server",
+                            "connection",
+                            "503",
+                            "502",
+                            "429",
+                        )
+                    )
+                    if is_retryable and attempt < self.max_retries:
+                        delay = self.retry_delays[attempt]
+                        logger.warning(
+                            f"[{contact_name}] API 错误 (attempt {attempt + 1}): "
+                            f"{error_msg[:120]} — {delay}s 后重试"
+                        )
+                        _time.sleep(delay)
+                        continue
+
+                    result.error = error_msg
+                    result.retry_count = attempt
+                    result.duration_ms = int((_time.time() - start) * 1000)
+                    return result
+
+            # ---- 处理响应 ----
+            try:
+                parsed = self._handle_response(response, contact_name)
+            except TokenBudgetExceededError:
+                self._save_debug_artifacts(
+                    attempt,
+                    contact_name,
+                    system_prompt,
+                    user_prompt,
+                    response.choices[0].message.content or "",
+                    "TokenBudgetExceededError",
+                )
+                if attempt < self.max_retries:
+                    current_max_tokens = min(current_max_tokens * 2, 16384)
+                    logger.warning(
+                        f"[{contact_name}] Token budget exceeded "
+                        f"(attempt {attempt + 1}), "
+                        f"max_tokens → {current_max_tokens} 重试"
+                    )
+                    continue
+                result.error = "Token budget exceeded after all retries"
+                result.retry_count = attempt
+                result.duration_ms = int((_time.time() - start) * 1000)
+                return result
+
+            except EmptyResponseError:
+                self._save_debug_artifacts(
+                    attempt,
+                    contact_name,
+                    system_prompt,
+                    user_prompt,
+                    "",
+                    "EmptyResponseError",
+                )
+                if attempt < self.max_retries:
+                    # 确保 thinking 已关闭
+                    if not thinking_disabled:
+                        thinking_disabled = True
+                        logger.warning(
+                            f"[{contact_name}] Empty response "
+                            f"(attempt {attempt + 1}), disabling thinking 重试"
+                        )
+                    else:
+                        current_max_tokens = min(current_max_tokens * 2, 16384)
+                        logger.warning(
+                            f"[{contact_name}] Empty response "
+                            f"(attempt {attempt + 1}), "
+                            f"max_tokens → {current_max_tokens} 重试"
+                        )
+                    continue
+                result.error = "Empty response after all retries"
+                result.retry_count = attempt
+                result.duration_ms = int((_time.time() - start) * 1000)
+                return result
+
+            except LLMError as e:
+                self._save_debug_artifacts(
+                    attempt,
+                    contact_name,
+                    system_prompt,
+                    user_prompt,
+                    response.choices[0].message.content or "",
+                    str(e),
+                )
+                if e.retryable and attempt < self.max_retries:
+                    current_temperature = max(0.0, current_temperature - 0.15)
+                    logger.warning(
+                        f"[{contact_name}] JSON 解析失败 "
+                        f"(attempt {attempt + 1}), "
+                        f"temperature → {current_temperature} 重试"
+                    )
+                    continue
+                result.error = f"重试 {self.max_retries} 次后仍然失败: {e}"
+                result.retry_count = attempt
+                result.duration_ms = int((_time.time() - start) * 1000)
+                return result
+
+            # ---- 成功 ----
+            result.raw_response = response.choices[0].message.content or ""
+            result.analysis = ChatAnalysis(**parsed)
+            result.success = True
+            result.retry_count = attempt
+            result.duration_ms = int((_time.time() - start) * 1000)
+
+            # Token 统计
+            if response.usage:
+                result.usage = TokenUsage(
+                    prompt_tokens=response.usage.prompt_tokens or 0,
+                    completion_tokens=response.usage.completion_tokens or 0,
+                    total_tokens=response.usage.total_tokens or 0,
+                )
+                self.total_prompt_tokens += result.usage.prompt_tokens
+                self.total_completion_tokens += result.usage.completion_tokens
+
+            self.total_successful_calls += 1
+
+            finish = response.choices[0].finish_reason or "unknown"
+            logger.info(
+                f"[{contact_name}] Chat 分析完成 — "
+                f"model={self.model} "
+                f"prompt={result.usage.prompt_tokens} "
+                f"completion={result.usage.completion_tokens} "
+                f"finish={finish} "
+                f"duration={result.duration_ms}ms"
+            )
+            return result
+
+        # ---- 所有重试耗尽 (不应可达) ----
+        raise AssertionError(f"Unreachable: all retries exhausted for [{contact_name}]")
 
     @property
     def total_tokens(self) -> int:

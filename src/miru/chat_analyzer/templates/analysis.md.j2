@@ -1,0 +1,46 @@
+{# Miru Assistant — 聊天分析报告模板 (Chat Analyzer Phase 2) #}
+{# 变量: contact_name, total_messages, generated_at, communication_style,
+   main_topics, emotional_tone, relationship_insights, key_conversations,
+   overall_summary #}
+# 聊天分析报告 — {{ contact_name }}
+
+> 生成时间：{{ generated_at }}
+> 分析消息数：{{ total_messages }}
+
+---
+
+## 📝 总体总结
+
+{{ overall_summary }}
+
+## 💬 对话风格
+
+{{ communication_style }}
+
+## 📌 主要话题
+
+{% for topic in main_topics %}
+- {{ topic }}
+{% else %}
+- （无）
+
+{% endfor %}
+## 🎭 情感基调
+
+{{ emotional_tone }}
+
+## 🔗 关系洞察
+
+{{ relationship_insights }}
+
+## ⭐ 关键对话
+
+{% for conv in key_conversations %}
+- **{{ conv.date }}**：{{ conv.summary }}
+{% else %}
+- （无）
+
+{% endfor %}
+---
+
+*本报告由 Miru Chat Analyzer 自动生成，仅供个人参考。*

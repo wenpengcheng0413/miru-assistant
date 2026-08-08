@@ -7,6 +7,14 @@
 # 只上传 settings.example.yaml（占位符版本）
 config/settings.yaml
 
+# === 联系人白名单（含真实联系人信息，隐私）===
+# 只上传 contacts.example.yaml（模板版本）
+config/contacts.yaml
+
+# === 微信数据库密钥（敏感，自动提取）===
+# 只上传 database_keys.example.yaml（模板版本）
+config/database_keys.yaml
+
 # === 运行时数据（微信聊天消息库、日志、密钥文件、备份）===
 data/
 chatlog/

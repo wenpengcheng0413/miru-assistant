@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from miru.chat_analyzer.exporter import (
+    ChatExporter,
     _parse_date_to_ts,
     _sanitize_dirname,
     classify_sender,
@@ -212,6 +213,57 @@ def _make_contact_db_empty(db_path: Path) -> None:
     conn.execute("CREATE TABLE contact (username TEXT, nick_name TEXT, remark TEXT, alias TEXT)")
     conn.commit()
     conn.close()
+
+
+# ============================================================
+# Test: Contact Candidates (交互选择用)
+# ============================================================
+
+
+class TestContactCandidates:
+    """find_contact_candidates 候选查找。"""
+
+    def _make_contacts(self) -> list[WeChatContact]:
+        """创建测试用联系人列表。"""
+        return [
+            WeChatContact(username="wxid_zhangsan", nickname="张三", remark="", alias=""),
+            WeChatContact(username="wxid_lisi", nickname="李四", remark="助教小李", alias="lisi"),
+            WeChatContact(username="wxid_wangwu", nickname="王五", remark="", alias="wangwu"),
+            WeChatContact(username="wxid_zhang2", nickname="张小三", remark="", alias=""),
+        ]
+
+    def test_exact_match_returns_single(self):
+        """精确匹配 → 唯一候选。"""
+        from miru.chat_analyzer.exporter import find_contact_candidates
+
+        contacts = self._make_contacts()
+        candidates = find_contact_candidates(contacts, "张三")
+        assert len(candidates) == 1
+        assert candidates[0].username == "wxid_zhangsan"
+
+    def test_partial_match_returns_all(self):
+        """部分匹配 → 所有候选（按长度排序）。"""
+        from miru.chat_analyzer.exporter import find_contact_candidates
+
+        contacts = self._make_contacts()
+        candidates = find_contact_candidates(contacts, "张")
+        # 张三 (2字), 张小三 (3字)
+        assert len(candidates) == 2
+        assert candidates[0].display_name == "张三"  # 短的优先
+        assert candidates[1].display_name == "张小三"
+
+    def test_no_match_returns_empty(self):
+        """无匹配 → 空列表。"""
+        from miru.chat_analyzer.exporter import find_contact_candidates
+
+        contacts = self._make_contacts()
+        assert find_contact_candidates(contacts, "赵六") == []
+
+    def test_empty_contacts(self):
+        """空联系人列表 → 空列表。"""
+        from miru.chat_analyzer.exporter import find_contact_candidates
+
+        assert find_contact_candidates([], "张三") == []
 
 
 # ============================================================
@@ -942,3 +994,74 @@ class TestEmptyUsernameFiltering:
             assert "real_user" in usernames
         finally:
             reader.close()
+
+
+# ============================================================
+# Test: ChatExporter.list_contacts
+# ============================================================
+
+
+class TestListContacts:
+    """ChatExporter.list_contacts() 联系人发现。"""
+
+    def test_list_contacts_success(self, tmp_path):
+        """成功返回联系人列表。"""
+        from unittest.mock import patch
+
+        ct_db = tmp_path / "contact.db"
+        _make_contact_db_for_chat(ct_db)
+
+        # 构造 fake reader
+        fake_reader = WeChatDBReader(ct_db, tmp_path / "msg.db")
+        fake_contacts = [
+            WeChatContact(username="wxid_a", nickname="小明", remark="", alias=""),
+            WeChatContact(username="wxid_b", nickname="小红", remark="", alias=""),
+        ]
+
+        exporter = ChatExporter(config_path="config/settings.yaml")
+        with patch.object(exporter, "_open_readers") as mock_open:
+            mock_open.return_value = ([fake_reader], True)
+            with patch.object(fake_reader, "get_contacts", return_value=fake_contacts):
+                contacts = exporter.list_contacts()
+
+        assert len(contacts) == 2
+        assert contacts[0].display_name == "小明"
+        assert contacts[0].username == "wxid_a"
+        fake_reader.close()
+
+    def test_list_contacts_uses_msg_db_fallback(self, tmp_path):
+        """contact.db 不可用时使用 Name2Id fallback。"""
+        from unittest.mock import patch
+
+        ct_db = tmp_path / "contact.db"
+        msg_db = tmp_path / "message_0.db"
+        _make_contact_db_for_chat(ct_db)
+        _make_message_db_for_chat(msg_db, contact_username="wxid_zhangsan")
+
+        fake_reader = WeChatDBReader(ct_db, msg_db)
+        exporter = ChatExporter(config_path="config/settings.yaml")
+        with patch.object(exporter, "_open_readers") as mock_open:
+            mock_open.return_value = ([fake_reader], False)  # ct 不可用
+            contacts = exporter.list_contacts()
+
+        # Name2Id 中有 wxid_self_me + wxid_zhangsan
+        usernames = {c.username for c in contacts}
+        assert "wxid_zhangsan" in usernames
+        fake_reader.close()
+
+    def test_list_contacts_raises_on_decrypt_failure(self):
+        """解密失败时抛出 ChatExportError。"""
+        from unittest.mock import patch
+
+        from miru.chat_analyzer.models import ChatExportError
+
+        exporter = ChatExporter(config_path="config/settings.yaml")
+        with (
+            patch.object(
+                exporter,
+                "_open_readers",
+                side_effect=ChatExportError("消息数据库解密失败: test"),
+            ),
+            pytest.raises(ChatExportError),
+        ):
+            exporter.list_contacts()

@@ -88,6 +88,25 @@ class WeChatConfig(BaseModel):
     on_version_mismatch: str = "warn"
 
 
+class ContactWhitelistItem(BaseModel):
+    """联系人白名单条目（离线全量导出）。"""
+    name: str  # 显示名（用于输出目录名）
+    wxid: str = ""  # 微信内部 ID（真实匹配依据，如 wxid_xxx）
+    enabled: bool = True  # 是否参与导出
+
+
+class ContactExportConfig(BaseModel):
+    """联系人白名单导出配置。"""
+    enabled: bool = False
+    whitelist: list[ContactWhitelistItem] = Field(default_factory=list)
+
+    def active_whitelist(self) -> list[ContactWhitelistItem]:
+        """返回启用的白名单条目。"""
+        if not self.enabled:
+            return []
+        return [item for item in self.whitelist if item.enabled]
+
+
 class MiruConfig(BaseModel):
     """Miru Assistant 主配置。"""
     groups: list[str] = Field(default_factory=list)
@@ -96,6 +115,7 @@ class MiruConfig(BaseModel):
     notifiers: list[NotifierConfig] = Field(default_factory=list)
     storage: StorageConfig = StorageConfig()
     wechat: WeChatConfig = WeChatConfig()
+    contacts: ContactExportConfig = ContactExportConfig()
 
 
 class AppConfig(BaseModel):

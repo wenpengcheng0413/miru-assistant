@@ -117,6 +117,72 @@ miru status
 # miru run
 ```
 
+## 联系人聊天记录导出（V2 Chat Analyzer）
+
+Miru V2 支持**离线导出指定联系人的全部聊天记录**并自动分析（AI 总结 / 统计 / 时间线）。
+离线模式直接读取微信加密数据库，**无需微信运行**，也**不需要管理员权限**。
+
+### 1. 配置联系人白名单
+
+在 `config/settings.yaml` 中添加（推荐填 `wxid`，最可靠）：
+
+```yaml
+miru:
+  contacts:
+    enabled: true
+    whitelist:
+      - name: Krista                 # 显示名（输出目录名）
+        wxid: "wxid_xxxxxxxxxxxxxxxx"  # 微信内部 ID（真实匹配依据）
+        enabled: true
+```
+
+> 不知道 wxid？运行 `miru doctor` 查看微信账号，或使用 `scripts/extract_db_keys.py`
+> 配合 `config/contacts.yaml`（旧格式：`name` + `username` + `remark`，兼容回退）。
+
+### 2. 导出与分析
+
+```bash
+# 导出单个联系人（导出 + AI 分析 + 统计 + 时间线）
+miru export --contact Krista
+
+# 只导出不分析（省钱）
+miru export --contact Krista --skip-analyze
+
+# 导出白名单全部联系人
+miru export --all
+
+# 群聊导出（在线模式，需微信运行 + 管理员权限）
+miru export --group "测试群"
+```
+
+### 3. 输出结构
+
+```
+output/
+└── Krista/
+    ├── chat.txt            # 可读版（文本原样 + 媒体摘要 [图片]/[语音]/[链接]）
+    ├── chat_raw.txt        # 原始完整版（全部 message_content 原样，含 XML）
+    ├── analysis.md         # AI 分析报告（--skip-analyze 时无）
+    ├── statistics.json     # 统计指标（消息数/高频词/响应时间等）
+    └── timeline.json       # 事件时间线（话题聚类）
+```
+
+### 4. 批量脚本
+
+```bash
+# 与 CLI 等价的一键批量流程
+python scripts/analyze_all.py                    # 白名单全部
+python scripts/analyze_all.py --contacts Krista  # 指定联系人
+python scripts/analyze_all.py --skip-analyze     # 跳过 AI 分析
+```
+
+### 5. 实现原理（简述）
+
+- 会话表名 = `Msg_{MD5(wxid)}`（微信 4.x），同一会话跨分片（message_0~5.db）存储
+- 密钥来自微信账号目录 `all_keys.json` 或 `config/database_keys.yaml`（由 `scripts/extract_db_keys.py` 提取）
+- 会话定位：各分片 `Name2Id`（wxid → rowid）+ `Msg_*` 表 `real_sender_id` 精准匹配
+- 消息内容：ZSTD 解压 + `sender_id\ncontent` 解析；非文本（图片/语音/链接）提取摘要
+
 ## 项目结构
 
 ```

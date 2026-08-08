@@ -63,6 +63,7 @@ class ExportResult:
     contact_name: str = ""  # 联系人显示名称
     contact_username: str = ""  # 联系人微信内部 ID
     output_file: str = ""  # 输出 TXT 文件路径
+    raw_output_file: str = ""  # 原始完整版 TXT 路径（离线导出时存在）
     total_messages: int = 0  # 导出消息总数
     text_messages: int = 0  # 文本消息数
     image_messages: int = 0  # 图片消息数
@@ -86,6 +87,30 @@ class ExportedMessage:
     sender: str = ""  # "我" 或联系人显示名
     content: str = ""  # 消息文本内容
     is_self: bool = False  # 是否为自己发送
+
+
+@dataclass
+class ChatMessage:
+    """
+    统一聊天消息模型（群聊与私聊共用）。
+
+    由导出器生成，供统计/分析/时间线等下游消费；
+    序列化为 chat.txt 时保留 sender/content 两个核心字段。
+    """
+
+    timestamp: int = 0  # Unix 时间戳（秒）
+    sender: str = ""  # 显示名称（"我" 或参与者名称）
+    sender_id: int = 0  # 分片 Name2Id rowid（0 = 未知）
+    sender_username: str = ""  # 发送者原始 wxid（身份判定的可靠依据）
+    content: str = ""  # 消息内容（文本原样；非文本为摘要或占位）
+    raw_content: str = ""  # 原始完整内容（含 XML/压缩前文本）
+    msg_type: int = 1  # 微信消息类型 (1=文本, 3=图片, 34=语音, ...)
+    conversation: str = ""  # 会话标识（wxid 或 @chatroom）
+    source: str = ""  # 数据来源（如 "message_1.db/Msg_xxx"）
+
+    @property
+    def is_text(self) -> bool:
+        return self.msg_type == 1
 
 
 @dataclass

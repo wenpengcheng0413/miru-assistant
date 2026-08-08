@@ -763,6 +763,277 @@ def push(
 
 
 @app.command()
+def export(
+    contact: str = typer.Option(
+        None, "--contact",
+        help="联系人名称（settings.yaml 白名单 name）",
+    ),
+    group: str = typer.Option(
+        None, "--group",
+        help="群聊名称（在线模式，需微信运行 + 管理员权限）",
+    ),
+    all_contacts: bool = typer.Option(
+        False, "--all",
+        help="导出白名单全部联系人",
+    ),
+    skip_analyze: bool = typer.Option(
+        False, "--skip-analyze",
+        help="跳过 DeepSeek AI 分析（只导出 + 统计 + 时间线）",
+    ),
+    output: str = typer.Option(
+        "output", "--output", "-o",
+        help="输出目录根路径",
+    ),
+    config_path: str = typer.Option(
+        "config/settings.yaml", "--config", "-c",
+        help="配置文件路径",
+    ),
+) -> None:
+    """
+    导出聊天记录（联系人离线全量 / 群聊在线）。
+
+    联系人模式（推荐，离线，无需微信运行）:
+        miru export --contact Krista          # 导出 + AI 分析 + 统计 + 时间线
+        miru export --all                     # 白名单全部
+        miru export --contact Krista --skip-analyze
+
+    群聊模式（在线，需微信运行 + 管理员权限）:
+        miru export --group "群名"
+    """
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    _show_banner()
+
+    # 联系人模式
+    if contact or all_contacts:
+        _export_contacts(
+            contact=contact,
+            all_contacts=all_contacts,
+            skip_analyze=skip_analyze,
+            output=output,
+            config_path=config_path,
+        )
+        return
+
+    # 群聊模式
+    if group:
+        _export_group(group, output, config_path)
+        return
+
+    console.print(f"[red]{FAIL} 请指定 --contact / --all 或 --group[/red]")
+    console.print("示例:")
+    console.print("  miru export --contact Krista")
+    console.print("  miru export --all")
+    console.print("  miru export --group \"测试群\"")
+    raise typer.Exit(code=1)
+
+
+def _export_contacts(
+    contact: str,
+    all_contacts: bool,
+    skip_analyze: bool,
+    output: str,
+    config_path: str,
+) -> None:
+    """联系人批量导出（复用 analyze_all._process_one 全流程）。"""
+    import importlib.util
+    from pathlib import Path
+
+    from miru.chat_analyzer.contacts import load_contact_aliases, load_contacts_config
+
+    # 加载 analyze_all 模块（scripts/ 非包，用文件路径加载）
+    analyze_all_path = Path(__file__).resolve().parents[3] / "scripts" / "analyze_all.py"
+    spec = importlib.util.spec_from_file_location("analyze_all", analyze_all_path)
+    if spec is None or spec.loader is None:
+        console.print(f"[red]{FAIL} 无法加载 scripts/analyze_all.py[/red]")
+        raise typer.Exit(code=1)
+    analyze_all = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(analyze_all)
+
+    # 白名单（双源）
+    aliases = load_contacts_config(config_path)
+    if not aliases:
+        aliases = load_contact_aliases("config/contacts.yaml")
+    if not aliases:
+        console.print(f"[red]{FAIL} 没有可用的联系人白名单[/red]")
+        console.print("请在 settings.yaml → miru.contacts.whitelist 中配置（推荐 wxid）")
+        raise typer.Exit(code=1)
+
+    if not all_contacts:
+        wanted = {c.strip().lower() for c in contact.split(",") if c.strip()}
+        aliases = [a for a in aliases if a.name.lower() in wanted]
+        if not aliases:
+            console.print(f"[red]{FAIL} 白名单中没有匹配的联系人: {contact}[/red]")
+            raise typer.Exit(code=1)
+
+    from miru.chat_analyzer.analyzer import ChatAnalyzer
+    from miru.chat_analyzer.exporter import ChatExporter
+    from miru.chat_analyzer.offline_exporter import ContactFullExporter
+    from miru.chat_analyzer.statistics import ChatStatistics
+    from miru.chat_analyzer.timeline import TimelineAnalyzer
+
+    offline_exporter = ContactFullExporter()
+    online_exporter = ChatExporter(config_path=config_path)
+    analyzer = ChatAnalyzer(config_path=config_path)
+    stats_runner = ChatStatistics()
+    timeline_runner = TimelineAnalyzer()
+
+    results = []
+    total = len(aliases)
+    for i, alias in enumerate(aliases, 1):
+        results.append(
+            analyze_all._process_one(
+                index=i,
+                total=total,
+                alias=alias,
+                offline_exporter=offline_exporter,
+                online_exporter=online_exporter,
+                analyzer=analyzer,
+                stats_runner=stats_runner,
+                timeline_runner=timeline_runner,
+                output_dir=output,
+                skip_analyze=skip_analyze,
+            )
+        )
+
+    ok = sum(1 for r in results if r["success"])
+    console.print()
+    console.print(f"[bold]联系人导出完成: {ok}/{len(results)} 成功[/bold]")
+    for r in results:
+        icon = "[green]OK[/green]" if r["success"] else "[red]FAIL[/red]"
+        console.print(f"  {icon} {r['name']}: {r.get('detail', '')}")
+    if ok < len(results):
+        raise typer.Exit(code=2)
+
+
+def _export_group(group_name: str, output: str, config_path: str) -> None:
+    """
+    群聊导出（在线模式：微信运行 + 管理员权限）。
+
+    读取群全部消息并导出为标准 chat.txt（[时间] 发送者：内容）。
+    """
+    import ctypes
+    import os
+    from datetime import datetime
+    from pathlib import Path
+
+    from miru.chat_analyzer.offline_reader import summarize_content
+    from miru.collector.diagnostics import detect_wechat_process, find_wechat_data_dir
+    from miru.collector.wechat_reader import WeChatDBReader
+
+    # 1. 环境检查
+    proc_info = detect_wechat_process()
+    if not proc_info.found:
+        console.print(f"[red]{FAIL} 微信未运行 — 群聊导出为在线模式，请先启动微信[/red]")
+        raise typer.Exit(code=1)
+    if ctypes.windll.shell32.IsUserAnAdmin() == 0:
+        console.print(f"[red]{FAIL} 需要管理员权限（读取微信进程内存）[/red]")
+        raise typer.Exit(code=1)
+
+    manual_dir = ""
+    try:
+        from miru.utils.config import load_config
+        cfg = load_config(config_path)
+        manual_dir = cfg.miru.wechat.data_dir
+    except Exception:
+        pass
+
+    data_dir_info = find_wechat_data_dir(manual_dir)
+    if not data_dir_info.found:
+        console.print(f"[red]{FAIL} 未找到微信数据目录[/red]")
+        raise typer.Exit(code=1)
+
+    from miru.collector.wechat_db_decrypt import (
+        extract_keys_from_process,
+        try_decrypt_wechat_db,
+    )
+
+    data_path = Path(data_dir_info.path)
+    db_root = data_path / "db_storage" if (data_path / "db_storage").exists() else data_path / "db"
+    contact_file = db_root / "contact" / "contact.db" if (db_root / "contact").exists() else db_root / "contact.db"
+    msg_file = db_root / "message" / "message_0.db" if (db_root / "message").exists() else db_root / "message_0.db"
+
+    if not contact_file.exists() or not msg_file.exists():
+        console.print(f"[red]{FAIL} 数据库文件缺失: {contact_file} / {msg_file}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print("提取密钥并解密数据库...")
+    keys = extract_keys_from_process(proc_info.pid)
+
+    ct_result = try_decrypt_wechat_db(contact_file, proc_info.pid, keys)
+    if not ct_result.success:
+        console.print(f"[red]{FAIL} contact.db 解密失败: {ct_result.error}[/red]")
+        raise typer.Exit(code=1)
+    msg_result = try_decrypt_wechat_db(msg_file, proc_info.pid, keys)
+    if not msg_result.success:
+        console.print(f"[red]{FAIL} message_0.db 解密失败: {msg_result.error}[/red]")
+        raise typer.Exit(code=1)
+
+    ct_path = Path(ct_result.db_path)
+    msg_path = Path(msg_result.db_path) if msg_result.is_decrypted else msg_file
+
+    # 2. 匹配群
+    reader = WeChatDBReader(ct_path, msg_path)
+    try:
+        groups = reader.get_groups()
+        target = next(
+            (g for g in groups if group_name in (g.nickname or "") or group_name in (g.remark or "")),
+            None,
+        )
+        if target is None:
+            console.print(f"[red]{FAIL} 未找到群: {group_name}[/red]")
+            names = "\n".join(f"  - {g.nickname or g.username}" for g in groups[:20])
+            console.print(f"现有群（前 20）:\n{names}")
+            raise typer.Exit(code=1)
+        console.print(f"群: {target.nickname} ({target.username})")
+
+        # 3. 读取全部消息
+        messages = reader.get_messages(target.username, limit=100000)
+        console.print(f"读取到 {len(messages)} 条消息")
+
+        # 4. 渲染 chat.txt
+        out_dir = Path(output) / target.nickname
+        out_dir.mkdir(parents=True, exist_ok=True)
+        chat_file = out_dir / "chat.txt"
+        lines = [
+            "=" * 60,
+            f"群聊：{target.nickname}",
+            f"导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"消息数量：{len(messages)}",
+            "=" * 60,
+            "",
+        ]
+        for m in messages:
+            ts = datetime.fromtimestamp(m.create_time).strftime("%Y-%m-%d %H:%M:%S")
+            sender = m.sender_name or "未知"
+            content = summarize_content(m.content, m.local_type) or ""
+            if not content:
+                continue
+            lines.append(f"[{ts}] {sender}：")
+            lines.append(content)
+            lines.append("")
+        while lines and lines[-1] == "":
+            lines.pop()
+        lines.append("")
+        chat_file.write_text("\n".join(lines), encoding="utf-8")
+        console.print(f"[green]{OK} 群聊已导出 → {chat_file}[/green]")
+
+        # 5. 统计
+        from miru.chat_analyzer.statistics import ChatStatistics
+        stats = ChatStatistics().analyze(
+            contact_name=target.nickname,
+            chat_file=chat_file,
+            output_dir=out_dir,
+        )
+        if stats.success:
+            console.print(f"[green]{OK} 统计完成 → {stats.statistics_file}[/green]")
+    finally:
+        reader.close()
+
+
+@app.command()
 def doctor(
     config_path: str = typer.Option(
         "config/settings.yaml", "--config", "-c",

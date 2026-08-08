@@ -23,6 +23,7 @@ Miru Assistant — Chat Analyzer 离线数据库读取器。
 """
 
 import hashlib
+import html
 import json
 import re
 import sqlite3
@@ -72,16 +73,65 @@ def decompress_zstd(data: bytes) -> bytes:
     return data
 
 
+# 无可见文本的 XML 消息 → 友好类型占位（避免 "[非文本消息 类型47]" 进入词频）
+_FALLBACK_LABELS = {
+    3: "[图片]",
+    34: "[语音]",
+    43: "[视频]",
+    47: "[表情]",
+    49: "[链接/文件]",
+    10000: "[系统消息]",
+}
+
+
+# 去标签用"合法标签"正则（标签名须字母开头），避免用户文本中的
+# 裸尖括号（如 "1 < 2"）与远处 > 错误配对。
+_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9_]*[^>]*>")
+
+
+def _extract_xml_text(content: str) -> str:
+    """从 XML 文本提取可见内容。
+
+    - XML 声明（<?xml ...?>）与 CDATA 内容一并处理
+    - CDATA 内容: 先反转义（&lt;tag&gt; 变 <tag>）再去标签（删净）
+    - 外层结构:   先去标签（真实标签）再反转义（文本实体的 < > 不会被误删）
+    """
+    def _clean_cdata(m: re.Match[str]) -> str:
+        seg = html.unescape(m.group(1))
+        return _TAG_RE.sub("", seg)
+
+    plain = re.sub(r"<\?xml[^>]*\?>", "", content, flags=re.I)
+    plain = re.sub(r"<!\[CDATA\[(.*?)\]\]>", _clean_cdata, plain, flags=re.S)
+    plain = _TAG_RE.sub("", plain)
+    return html.unescape(plain).strip()
+
+
 def summarize_content(content: str, local_type: int) -> str:
     """
     将原始消息内容转为可读摘要。
 
     文本原样；XML 提取关键信息；空内容返回空串（由调用方填充类型占位）。
+    文本中若含 XML 标记（如 "wxid_xxx\\n<msg>..." 前缀 + 多行 XML），
+    也会提取可见文本，避免整段 XML 原样进入导出与词频。
     """
-    if not content or not content.strip():
+    if not content:
         return ""
-    if not content.startswith("<"):
-        return content
+    stripped = content.strip()
+    if not stripped:
+        return ""
+
+    # 不以 < 开头 → 纯文本（可能含转义实体 / 前缀 + XML 标记）
+    if not stripped.startswith("<"):
+        unescaped = html.unescape(stripped)
+        if unescaped.startswith("<"):
+            return summarize_content(unescaped, local_type)
+        # 文本内含 XML 标记（如 "某前缀\n<msg>..."）→ 提取可见文本
+        if _TAG_RE.search(unescaped):
+            plain = _extract_xml_text(unescaped)
+            if plain:
+                return plain[:200]
+            return _FALLBACK_LABELS.get(local_type, f"[非文本消息 类型{local_type}]")
+        return unescaped
 
     # 图片
     if "<img" in content:
@@ -102,7 +152,7 @@ def summarize_content(content: str, local_type: int) -> str:
         parts: list[str] = []
         tm = re.search(r"<title>([^<]*)</title>", content)
         if tm and tm.group(1).strip():
-            parts.append(f"标题: {tm.group(1).strip()}")
+            parts.append(f"标题: {html.unescape(tm.group(1).strip())}")
         # 引用消息: refermsg 里的 displayname + content
         rm = re.search(
             r"<refermsg>.*?<displayname>([^<]*)</displayname>.*?<content>([^<]*)</content>",
@@ -110,16 +160,20 @@ def summarize_content(content: str, local_type: int) -> str:
             re.S,
         )
         if rm and (rm.group(1).strip() or rm.group(2).strip()):
-            parts.append(f"引用 {rm.group(1).strip()}: {rm.group(2).strip()}")
+            parts.append(
+                f"引用 {html.unescape(rm.group(1).strip())}: "
+                f"{html.unescape(rm.group(2).strip())}"
+            )
         label = "文件" if "<fileext" in content or "<filename" in content else "链接"
         if parts:
             return f"[{label}] " + " | ".join(parts)
         return f"[{label}]"
-    # 其他 XML: 提取可见文本（去标签）
-    plain = re.sub(r"<[^>]+>", "", content).strip()
+
+    # 其他 XML: 提取可见文本
+    plain = _extract_xml_text(stripped)
     if plain:
         return plain[:200]
-    return f"[非文本消息 类型{local_type}]"
+    return _FALLBACK_LABELS.get(local_type, f"[非文本消息 类型{local_type}]")
 
 
 # ============================================================

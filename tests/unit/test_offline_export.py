@@ -472,6 +472,86 @@ class TestSummarizeContent:
         """其他 XML → 去标签提取文本。"""
         assert summarize_content("<msg><title>简单文本</title></msg>", 49) == "简单文本"
 
+    def test_html_entities_unescaped(self):
+        """XML 转义实体反转义（&lt; &gt; &amp; 等）。"""
+        assert summarize_content("<msg><title>a&lt;b &amp; c&gt;d</title></msg>", 49) == "a<b & c>d"
+
+    def test_cdata_unwrapped(self):
+        """CDATA 标记展开为内容。"""
+        xml = "<msg><![CDATA[你好，这是内容]]></msg>"
+        assert summarize_content(xml, 49) == "你好，这是内容"
+
+    def test_cdata_with_entities(self):
+        """CDATA 内实体反转义。"""
+        xml = "<msg><![CDATA[1 &lt; 2 且 a &amp; b]]></msg>"
+        assert summarize_content(xml, 49) == "1 < 2 且 a & b"
+
+    def test_appmsg_title_unescaped(self):
+        """链接标题中的转义实体反转义。"""
+        xml = '<msg><appmsg><title>价格 &lt;100元&gt;</title><type>57</type></appmsg></msg>'
+        result = summarize_content(xml, 49)
+        assert "标题: 价格 <100元>" in result
+
+    def test_escaped_xml_text(self):
+        """转义形式的 XML 文本（&lt; 开头）也能正确处理。"""
+        content = "&lt;msg&gt;&lt;title&gt;转义内容&lt;/title&gt;&lt;/msg&gt;"
+        assert summarize_content(content, 1) == "转义内容"
+
+    def test_cdata_escaped_tags_removed(self):
+        """CDATA 内的转义标签在反转义后被去净。"""
+        xml = "<msg><![CDATA[&lt;dataitem&gt;&lt;sourcename&gt;来源&lt;/sourcename&gt;&lt;/dataitem&gt;]]></msg>"
+        assert summarize_content(xml, 49) == "来源"
+
+    def test_emoji_xml_fallback_label(self):
+        """表情 XML 无可见文本 → [表情]（而非 [非文本消息 类型47]）。"""
+        xml = "<msg><emoji fromusername=\"wxid_x\"/></msg>"
+        assert summarize_content(xml, 47) == "[表情]"
+
+    def test_xml_declaration_removed(self):
+        """XML 声明（<?xml version="1.0"?>）被清理。"""
+        xml = '<?xml version="1.0"?>\n<msg><title>声明后的内容</title></msg>'
+        assert summarize_content(xml, 49) == "声明后的内容"
+
+    def test_plain_text_unescaped(self):
+        """纯文本中的合法实体反转义，非法实体保留。"""
+        assert summarize_content("价格 &lt;100元&gt; 且 a &amp; b", 1) == "价格 <100元> 且 a & b"
+        assert summarize_content("AT&T", 1) == "AT&T"  # 非法实体原样保留
+
+    def test_whitespace_prefixed_xml(self):
+        """以空白开头的多行 XML 文本也能进入 XML 分支处理。"""
+        xml = "\t\t<recorditem><![CDATA[(null)]]></recorditem>"
+        assert summarize_content(xml, 1) == "(null)"
+        xml2 = "\n  <plain><![CDATA[]]></plain>"
+        # 空 CDATA 无可见文本 → 类型占位符
+        assert summarize_content(xml2, 1) == "[非文本消息 类型1]"
+
+    def test_multiline_xml_text_message(self):
+        """文本消息（local_type=1）内容为多行 XML 时提取可见文本。"""
+        xml = (
+            "\t\t<plain><![CDATA[\"$username$\"邀请你和\"$names$\"加入了群聊]]></plain>"
+        )
+        result = summarize_content(xml, 1)
+        assert '"$username$"邀请你和"$names$"加入了群聊' in result
+
+    def test_text_with_xml_prefix(self):
+        """文本含前缀 + 多行 XML（如 "wxid_xxx\\n<msg>..."）→ 标签清理、可见文本保留。"""
+        content = (
+            "wxid_oti4ygrpfdag12\n"
+            "<msg><appmsg><title>分享链接</title></appmsg>"
+            "<fromusername>wxid_oti4ygrpfdag12</fromusername></msg>"
+        )
+        result = summarize_content(content, 1)
+        assert "<appmsg>" not in result  # XML 标签被清理
+        assert "<fromusername>" not in result
+        assert "分享链接" in result  # 可见文本保留
+
+    def test_text_with_xml_no_visible_text(self):
+        """前缀文本保留，XML 标记清理。"""
+        content = "前缀\n<recorditem><![CDATA[(null)]]></recorditem>"
+        assert summarize_content(content, 1) == "前缀\n(null)"  # 前缀 + CDATA 内容
+        content2 = "前缀\n<plain><![CDATA[]]></plain>"
+        assert summarize_content(content2, 1) == "前缀"  # 空 CDATA 被删，前缀保留
+
 
 # ============================================================
 # Test: decompress_zstd

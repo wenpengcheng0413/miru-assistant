@@ -191,6 +191,9 @@ output/
 > - **`xxx.wxgf`** — 高清原图备份（微信客户端可正常查看）
 > - 聊天记录中引用 jpg，高清原件不丢失
 
+> 📖 **完整使用指南**：详见 [docs/MEDIA_EXPORT_GUIDE.md](docs/MEDIA_EXPORT_GUIDE.md)
+> （配置详解、技术原理、FAQ、性能参考、故障排查）
+
 ### 4. 批量脚本
 
 ```bash

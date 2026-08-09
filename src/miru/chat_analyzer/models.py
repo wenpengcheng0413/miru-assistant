@@ -71,6 +71,11 @@ class ExportResult:
     date_range_start: str = ""  # 第一条消息日期
     date_range_end: str = ""  # 最后一条消息日期
     export_time: str = ""  # 导出时间
+    media_dir: str = ""  # 媒体附件目录（相对输出目录，如 "media"）
+    voice_transcribed: int = 0  # 成功转写语音数
+    voice_failed: int = 0  # 转写失败语音数
+    image_exported: int = 0  # 成功导出图片数
+    image_failed: int = 0  # 解密失败（保留 .dat 原件）数
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -105,6 +110,7 @@ class ChatMessage:
     content: str = ""  # 消息内容（文本原样；非文本为摘要或占位）
     raw_content: str = ""  # 原始完整内容（含 XML/压缩前文本）
     msg_type: int = 1  # 微信消息类型 (1=文本, 3=图片, 34=语音, ...)
+    server_id: int = 0  # 微信服务端消息 ID（与 media_0.db VoiceInfo.svr_id 关联）
     conversation: str = ""  # 会话标识（wxid 或 @chatroom）
     source: str = ""  # 数据来源（如 "message_1.db/Msg_xxx"）
 

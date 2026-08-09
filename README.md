@@ -153,19 +153,43 @@ miru export --all
 
 # 群聊导出（在线模式，需微信运行 + 管理员权限）
 miru export --group "测试群"
+
+# 媒体处理开关（图片附件 + 语音转文字，默认跟随 settings.yaml 配置）
+miru export --contact Krista --with-media    # 强制开启
+miru export --contact Krista --no-media      # 强制关闭
 ```
 
-### 3. 输出结构
+### 3. 语音转文字 + 图片保留（媒体导出）
+
+导出时自动处理语音与图片消息（默认开启，可在 `settings.yaml` 的 `miru.export.media` 关闭）：
+
+- **语音转文字**：从 `media_0.db` 提取语音（SILK 格式），本地 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) 转写为中文文本。`chat.txt` 中显示为 `[语音转文字] xxx（时长 3s）`。首次使用自动下载模型（small 约 460MB，存于 `data/models/`）；转写结果缓存（`data/stt_cache.json`），重复导出不重复转写。
+- **图片保留**：解密微信 4.x 图片 `.dat`（V1 固定密钥 / V2 从微信进程内存提取），导出到 `media/img/` 并在 `chat.txt` 中引用路径。解密失败自动保留 `.dat` 原件并标注 `[图片未解密]`。
+
+输出结构（启用媒体后）：
 
 ```
 output/
 └── Krista/
-    ├── chat.txt            # 可读版（文本原样 + 媒体摘要 [图片]/[语音]/[链接]）
+    ├── chat.txt            # 可读版（语音行含转写文本，图片行含路径）
     ├── chat_raw.txt        # 原始完整版（全部 message_content 原样，含 XML）
     ├── analysis.md         # AI 分析报告（--skip-analyze 时无）
     ├── statistics.json     # 统计指标（消息数/高频词/响应时间等）
-    └── timeline.json       # 事件时间线（话题聚类）
+    ├── timeline.json       # 事件时间线（话题聚类）
+    └── media/
+        ├── img/xxx.jpg     # 解密导出的图片（失败时保留 .dat 原件）
+        └── voice/xxx.wav   # 语音原件（keep_voice_files 开启时）
 ```
+
+> **图片解密说明**：微信 4.x 图片 `.dat` 为 V2 加密，Miru 会自动从磁盘派生密钥
+> （`aes_key = MD5(uin + wxid)`，从账号目录后缀 + 图片尾部投票推断），**无需微信运行，
+> 完全离线**。解密失败（如未下载的图片）自动保留 `.dat` 原件，不丢数据。
+>
+> **格式说明**：微信 4.x 高清原图是私有 **WXGF/HEVC 格式**（压缩率高但标准解码器
+> 无法恢复色度，ffmpeg/libde265 均验证色度丢失）。Miru 因此采用：
+> - **`xxx.jpg`** — 微信标准缩略图（`_t.dat` 解密，颜色正确、可直接查看）
+> - **`xxx.wxgf`** — 高清原图备份（微信客户端可正常查看）
+> - 聊天记录中引用 jpg，高清原件不丢失
 
 ### 4. 批量脚本
 

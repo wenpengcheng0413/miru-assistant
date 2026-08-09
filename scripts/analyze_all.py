@@ -20,6 +20,7 @@ Miru Assistant — Chat Analyzer 批量全流程 (白名单模式)。
 import argparse
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 # 确保项目根目录在 sys.path 中
@@ -65,6 +66,22 @@ def main() -> int:
         action="store_true",
         help="跳过 DeepSeek AI 分析（只导出 + 统计 + 时间线）",
     )
+    parser.add_argument(
+        "--with-media",
+        action="store_true",
+        help="导出图片附件 + 语音转文字（默认跟随 settings.yaml 配置）",
+    )
+    parser.add_argument(
+        "--no-media",
+        action="store_true",
+        help="关闭图片/语音处理（覆盖配置）",
+    )
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=3,
+        help="并行处理联系人数量（默认 3，语音转写可并行加速）",
+    )
 
     args = parser.parse_args()
 
@@ -108,9 +125,25 @@ def main() -> int:
     print("=" * 60)
     print("  Miru Chat Analyzer — 批量全流程")
     print("=" * 60)
+    # ---- 媒体配置 ----
+    from miru.chat_analyzer.media.processor import MediaConfig
+    from miru.utils.config import load_config
+
+    media_config = MediaConfig()
+    try:
+        media_config = MediaConfig.from_dict(load_config(args.config).miru.export.media.model_dump())
+    except Exception:
+        pass
+    if args.with_media:
+        media_config.enabled = media_config.images = media_config.voice_transcribe = True
+    if args.no_media:
+        media_config.enabled = media_config.images = media_config.voice_transcribe = False
+
     print(f"  联系人数量: {len(aliases)}")
     print(f"  输出目录:   {args.output}")
     print(f"  AI 分析:    {'跳过' if args.skip_analyze else '开启'}")
+    print(f"  媒体导出:   {'开启 (图片+语音转写)' if media_config.enabled else '关闭'}")
+    print(f"  并行:       {args.parallel} 个联系人同时处理")
     print("=" * 60)
     print()
 
@@ -131,21 +164,37 @@ def main() -> int:
     results: list[dict] = []
     total_start = time.time()
 
-    for i, alias in enumerate(aliases, 1):
-        results.append(
-            _process_one(
-                index=i,
-                total=len(aliases),
-                alias=alias,
-                offline_exporter=offline_exporter,
-                online_exporter=online_exporter,
-                analyzer=analyzer,
-                stats_runner=stats_runner,
-                timeline_runner=timeline_runner,
-                output_dir=args.output,
-                skip_analyze=args.skip_analyze,
+    # 每线程独立 STT 模型（whisper 推理释放 GIL，独立模型可真并行；
+    # 共享实例会因 Python 层 GIL 串行化而显著变慢）
+    shared_stt = None
+
+    workers = max(1, min(args.parallel, len(aliases)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = []
+        for i, alias in enumerate(aliases, 1):
+            futures.append(
+                pool.submit(
+                    _process_one,
+                    i,
+                    len(aliases),
+                    alias,
+                    offline_exporter,
+                    online_exporter,
+                    analyzer,
+                    stats_runner,
+                    timeline_runner,
+                    args.output,
+                    args.skip_analyze,
+                    media_config,
+                    shared_stt,
+                )
             )
-        )
+        for f in as_completed(futures):
+            try:
+                results.append(f.result())
+            except Exception as e:
+                print(f"  [错误] 联系人处理异常: {e}")
+                results.append({"name": "?", "success": False, "detail": str(e)[:60]})
 
     # ---- 4. 汇总 ----
     total_elapsed = time.time() - total_start
@@ -184,6 +233,8 @@ def _process_one(
     timeline_runner,
     output_dir: str,
     skip_analyze: bool,
+    media_config=None,
+    shared_stt=None,
 ) -> dict:
     """
     处理单个联系人: 导出 + (分析) + 统计 + 时间线。
@@ -213,6 +264,8 @@ def _process_one(
             contact_name=name,
             wxid=alias.wxid,
             output_dir=output_dir,
+            media_config=media_config,
+            media_stt=shared_stt,
         )
     else:
         export = online_exporter.export(
@@ -276,6 +329,11 @@ def _process_one(
     detail = f"{export.total_messages} 条消息"
     if not skip_analyze and analysis.token_usage:
         detail += f", {analysis.token_usage.get('total', 0)} tokens"
+    if export.voice_transcribed or export.image_exported:
+        detail += (
+            f", 语音转写 {export.voice_transcribed} 条, "
+            f"图片导出 {export.image_exported} 张"
+        )
     return {"name": name, "success": True, "detail": detail}
 
 

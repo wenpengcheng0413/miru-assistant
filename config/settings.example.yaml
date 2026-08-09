@@ -92,3 +92,16 @@ miru:
     tested_version: "4.0.x"
     # 版本不匹配时的行为: warn | error | skip
     on_version_mismatch: "warn"
+
+  # ----------------------------------------------------------
+  # 导出（聊天记录媒体处理）— 可选
+  # ----------------------------------------------------------
+  export:
+    media:
+      enabled: true            # 总开关：语音转写 + 图片保留
+      images: true             # 导出图片附件（media/img/*.jpg，解密失败保留 .dat）
+      voice_transcribe: true   # 语音转文字（本地 faster-whisper）
+      stt_model: "small"       # faster-whisper 模型: tiny/base/small(推荐)/medium
+      stt_cache: true          # 转写结果缓存（重复导出复用）
+      keep_voice_files: false  # 是否在 media/voice/ 保留语音 WAV 原件
+      convert_wxgf: true        # 微信 HEVC 私有图转 jpg（需要 ffmpeg）

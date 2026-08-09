@@ -788,6 +788,10 @@ def export(
         "config/settings.yaml", "--config", "-c",
         help="配置文件路径",
     ),
+    media: bool | None = typer.Option(
+        None, "--with-media/--no-media",
+        help="导出图片附件 + 语音转文字（默认跟随 settings.yaml 配置）",
+    ),
 ) -> None:
     """
     导出聊天记录（联系人离线全量 / 群聊在线）。
@@ -796,6 +800,8 @@ def export(
         miru export --contact Krista          # 导出 + AI 分析 + 统计 + 时间线
         miru export --all                     # 白名单全部
         miru export --contact Krista --skip-analyze
+        miru export --contact Krista --no-media   # 关闭图片/语音处理
+        miru export --contact Krista --with-media # 强制开启（覆盖配置）
 
     群聊模式（在线，需微信运行 + 管理员权限）:
         miru export --group "群名"
@@ -814,6 +820,7 @@ def export(
             skip_analyze=skip_analyze,
             output=output,
             config_path=config_path,
+            media=media,
         )
         return
 
@@ -830,12 +837,25 @@ def export(
     raise typer.Exit(code=1)
 
 
+def _load_media_config(config_path: str) -> "MediaConfig":
+    """从 settings.yaml 读取媒体导出配置（miru.export.media）。"""
+    from miru.chat_analyzer.media.processor import MediaConfig
+    from miru.utils.config import load_config
+
+    try:
+        cfg = load_config(config_path)
+        return MediaConfig.from_dict(cfg.miru.export.media.model_dump())
+    except Exception:
+        return MediaConfig()
+
+
 def _export_contacts(
     contact: str,
     all_contacts: bool,
     skip_analyze: bool,
     output: str,
     config_path: str,
+    media: bool | None = None,
 ) -> None:
     """联系人批量导出（复用 analyze_all._process_one 全流程）。"""
     import importlib.util
@@ -870,15 +890,36 @@ def _export_contacts(
 
     from miru.chat_analyzer.analyzer import ChatAnalyzer
     from miru.chat_analyzer.exporter import ChatExporter
+    from miru.chat_analyzer.media.processor import MediaConfig
     from miru.chat_analyzer.offline_exporter import ContactFullExporter
     from miru.chat_analyzer.statistics import ChatStatistics
     from miru.chat_analyzer.timeline import TimelineAnalyzer
+
+    # 媒体配置: CLI 显式 --with-media/--no-media 覆盖 settings.yaml
+    media_config = _load_media_config(config_path)
+    if media is not None:
+        media_config.enabled = media
+        media_config.images = media
+        media_config.voice_transcribe = media
 
     offline_exporter = ContactFullExporter()
     online_exporter = ChatExporter(config_path=config_path)
     analyzer = ChatAnalyzer(config_path=config_path)
     stats_runner = ChatStatistics()
     timeline_runner = TimelineAnalyzer()
+
+    # 共享 STT 引擎（多联系人复用同一模型）
+    from miru.chat_analyzer.media.transcribe import STTEngine
+
+    shared_stt = None
+    if media_config.enabled and media_config.voice_transcribe:
+        try:
+            shared_stt = STTEngine(
+                model_name=media_config.stt_model,
+                cache_enabled=media_config.stt_cache,
+            )
+        except Exception:
+            pass
 
     results = []
     total = len(aliases)
@@ -895,6 +936,8 @@ def _export_contacts(
                 timeline_runner=timeline_runner,
                 output_dir=output,
                 skip_analyze=skip_analyze,
+                media_config=media_config,
+                shared_stt=shared_stt,
             )
         )
 

@@ -35,6 +35,8 @@ dependencies = [
     "pycryptodome>=3.20.0",        # AES 解密
     "zstandard>=0.22.0",           # 消息内容解压
     "rich>=13.0.0",                # 终端美化输出
+    "pysilk>=0.0.1",               # 微信语音 SILK V3 解码
+    "faster-whisper>=1.2.0",       # 本地语音转文字 (STT)
 ]
 
 [project.optional-dependencies]

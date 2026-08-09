@@ -56,6 +56,8 @@ class ContactFullExporter:
             data_root: 微信数据目录（空 = 自动检测）。
         """
         self.data_root = data_root
+        # 媒体处理器类（测试可注入替换）
+        self._processor_cls = None
 
     # ---- 主入口 ----
 
@@ -64,6 +66,8 @@ class ContactFullExporter:
         contact_name: str,
         wxid: str | None = None,
         output_dir: str | Path = "output",
+        media_config: "MediaConfig | None" = None,
+        media_stt: "STTEngine | None" = None,
     ) -> ExportResult:
         """
         导出指定联系人的全部消息。
@@ -72,6 +76,10 @@ class ContactFullExporter:
             contact_name: 联系人显示名称（用于输出目录名）。
             wxid: 微信内部 ID（最可靠）。为 None 时自动从 contact.db 解析。
             output_dir: 输出目录根路径。
+            media_config: 媒体处理配置（语音转写 + 图片导出）；
+                None 表示不处理媒体（保持原行为）。
+            media_stt: 共享 STT 引擎（并行导出时多个联系人复用同一
+                模型实例，避免重复加载模型）；None = 每个处理器自建。
 
         Returns:
             ExportResult — 含 chat.txt 与 chat_raw.txt 路径。
@@ -115,7 +123,44 @@ class ContactFullExporter:
 
             # ---- 4. 发送者命名与格式化 ----
             self_wxid = self._self_wxid(db)
-            lines, lines_raw, text_count = self._render(msgs, target_wxid, display_name, self_wxid)
+
+            # ---- 4.5 媒体处理（语音转写 + 图片导出） ----
+            overrides: dict[int, str] = {}
+            if media_config is not None and media_config.enabled:
+                try:
+                    from miru.chat_analyzer.media.processor import MediaProcessor
+
+                    processor_cls = self._processor_cls or MediaProcessor
+                    out_dir = Path(output_dir) / self._safe_dirname(display_name)
+                    if media_stt is not None:
+                        # 显式传入共享/外部 STT 引擎
+                        processor = processor_cls(db.account_dir, db, media_config, stt=media_stt)
+                    else:
+                        # 未指定 → 走 sentinel 默认（按配置自动创建）
+                        processor = processor_cls(db.account_dir, db, media_config)
+                    media_result, overrides = processor.process(
+                        msgs,
+                        target_wxid,
+                        out_dir / "media",
+                    )
+                    result.media_dir = media_result.media_dir
+                    result.voice_transcribed = media_result.voice_transcribed
+                    result.voice_failed = media_result.voice_failed
+                    result.image_exported = media_result.image_exported
+                    result.image_failed = media_result.image_failed
+                    result.warnings.extend(media_result.warnings[:10])
+                    logger.info(
+                        f"媒体处理完成: 语音 {media_result.voice_transcribed}/"
+                        f"{media_result.voice_total} 转写, "
+                        f"图片 {media_result.image_exported}/{media_result.image_total} 导出"
+                    )
+                except Exception as e:
+                    logger.warning(f"媒体处理失败（跳过，继续导出文本）: {e}")
+                    result.warnings.append(f"媒体处理失败: {str(e)[:100]}")
+
+            lines, lines_raw, text_count = self._render(
+                msgs, target_wxid, display_name, self_wxid, overrides=overrides
+            )
 
             # ---- 5. 写文件 ----
             out_dir = Path(output_dir) / self._safe_dirname(display_name)
@@ -187,22 +232,30 @@ class ContactFullExporter:
         target_wxid: str,
         display_name: str,
         self_wxid: str,
+        overrides: dict[int, str] | None = None,
     ) -> tuple[list[str], list[str], int]:
-        """渲染可读版与原始版内容。返回 (lines, lines_raw, text_count)。"""
+        """渲染可读版与原始版内容。返回 (lines, lines_raw, text_count)。
+
+        overrides: {消息下标: 渲染文本} — 媒体处理（语音转写/图片路径）覆盖默认摘要。
+        """
+        overrides = overrides or {}
         lines: list[str] = []
         lines_raw: list[str] = []
         text_count = 0
         # sender 显示名 → wxid 反查需要 sender_name，ChatMessage.sender 已是显示名；
         # "我"判定: sender_name 与当前账号一致（名称缓存中显示名可能等于 wxid）
-        for m in msgs:
+        for i, m in enumerate(msgs):
             if m.msg_type == MSG_TYPE_TEXT:
                 text_count += 1
             label = ContactFullExporter._sender_label(m, target_wxid, display_name, self_wxid)
             # 分钟级时间戳（与在线 ChatExporter 格式一致，供 statistics/analyzer 解析）
             ts = datetime.fromtimestamp(m.timestamp).strftime("%Y-%m-%d %H:%M")
-            summary = summarize_content(m.content, m.msg_type) or _TYPE_LABELS.get(
-                m.msg_type, f"[消息类型{m.msg_type}]"
-            )
+            if i in overrides:
+                summary = overrides[i]
+            else:
+                summary = summarize_content(m.content, m.msg_type) or _TYPE_LABELS.get(
+                    m.msg_type, f"[消息类型{m.msg_type}]"
+                )
             lines.append(f"[{ts}] {label}：")
             lines.append(summary)
             lines.append("")
@@ -253,7 +306,13 @@ def export_contact_full(
     wxid: str | None = None,
     output_dir: str | Path = "output",
     data_root: str | Path = "",
+    media_config: "MediaConfig | None" = None,
 ) -> ExportResult:
     """便捷函数: 一键导出联系人全量聊天记录。"""
     exporter = ContactFullExporter(data_root=data_root)
-    return exporter.export(contact_name=contact_name, wxid=wxid, output_dir=output_dir)
+    return exporter.export(
+        contact_name=contact_name,
+        wxid=wxid,
+        output_dir=output_dir,
+        media_config=media_config,
+    )

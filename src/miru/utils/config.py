@@ -107,6 +107,22 @@ class ContactExportConfig(BaseModel):
         return [item for item in self.whitelist if item.enabled]
 
 
+class ExportMediaConfig(BaseModel):
+    """媒体导出配置（语音转写 + 图片保留）。"""
+    enabled: bool = True  # 总开关
+    images: bool = True  # 导出图片附件
+    voice_transcribe: bool = True  # 语音转文字
+    stt_model: str = "small"  # faster-whisper 模型: tiny/base/small/medium
+    stt_cache: bool = True  # 转写结果缓存（复用，避免重复转写）
+    keep_voice_files: bool = False  # 是否保留语音 WAV 原件
+    convert_wxgf: bool = True  # 微信 HEVC 私有图转 jpg（需要 ffmpeg）
+
+
+class ExportConfig(BaseModel):
+    """导出配置。"""
+    media: ExportMediaConfig = ExportMediaConfig()
+
+
 class MiruConfig(BaseModel):
     """Miru Assistant 主配置。"""
     groups: list[str] = Field(default_factory=list)
@@ -116,6 +132,7 @@ class MiruConfig(BaseModel):
     storage: StorageConfig = StorageConfig()
     wechat: WeChatConfig = WeChatConfig()
     contacts: ContactExportConfig = ContactExportConfig()
+    export: ExportConfig = ExportConfig()
 
 
 class AppConfig(BaseModel):

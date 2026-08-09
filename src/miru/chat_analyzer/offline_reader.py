@@ -474,6 +474,7 @@ class OfflineWeChatDB:
                     content=content,
                     raw_content=str(d.get("message_content") or ""),
                     msg_type=int(d.get("local_type") or 0),
+                    server_id=int(d.get("server_id") or 0),
                     conversation=self._conversation_id(table, shard_rel),
                     source=f"{shard_rel}/{table}",
                 )

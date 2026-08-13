@@ -78,6 +78,11 @@ class WsClient {
     _channel?.sink.add(jsonEncode(payload));
   }
 
+  /// 录音协议闸门：通知后端"开始录音"，之后才接收音频帧
+  void sendAudioStart() {
+    _channel?.sink.add(jsonEncode({'type': 'audio_start'}));
+  }
+
   void sendAudio(Uint8List chunk) {
     _channel?.sink.add(chunk);
   }

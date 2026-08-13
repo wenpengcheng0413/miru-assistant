@@ -45,6 +45,8 @@ class ChatController extends ChangeNotifier {
   /// WS 是否已连上（聊天页顶部显示离线横幅）
   bool wsConnected = false;
 
+  Timer? _listenTimer; // 录音兜底：手势丢失时最多录 30 秒
+
   void init() {
     ws.onJson = _onJson;
     ws.onAudio = player.feedAudio;
@@ -54,10 +56,14 @@ class ChatController extends ChangeNotifier {
     };
     ws.onDisconnected = () {
       wsConnected = false;
-      if (phase != ChatPhase.idle) {
+      _listenTimer?.cancel();
+      if (phase == ChatPhase.listening) {
+        recorder.stop(); // 断线立刻停录音，防止麦克风泄漏
+        lines.add(ChatLine('note', '连接断开，录音已停止'));
+      } else if (phase != ChatPhase.idle) {
         lines.add(ChatLine('note', '连接断开，正在重连…'));
-        phase = ChatPhase.idle;
       }
+      if (phase != ChatPhase.idle) phase = ChatPhase.idle;
       notifyListeners();
       _reconnect();
     };
@@ -131,19 +137,32 @@ class ChatController extends ChangeNotifier {
 
   Future<void> startListening() async {
     if (phase == ChatPhase.listening) return;
+    // 先亮红灯再启动：UI 反馈即时；启动失败（如权限被拒）回退到 idle
+    phase = ChatPhase.listening;
+    notifyListeners();
+    ws.sendAudioStart();
     try {
       await recorder.start(onChunk: ws.sendAudio);
     } catch (e) {
+      phase = ChatPhase.idle;
       lines.add(ChatLine('note', e.toString()));
       notifyListeners();
       return;
     }
-    phase = ChatPhase.listening;
-    notifyListeners();
+    // 兜底：指针丢失/系统打断时最多录 30 秒自动停
+    _listenTimer?.cancel();
+    _listenTimer = Timer(const Duration(seconds: 30), () {
+      if (phase == ChatPhase.listening) {
+        stopListening();
+        lines.add(ChatLine('note', '录音超时，已自动停止'));
+        notifyListeners();
+      }
+    });
   }
 
   Future<void> stopListening() async {
     if (phase != ChatPhase.listening) return;
+    _listenTimer?.cancel();
     await recorder.stop();
     ws.sendJson({'type': 'audio_end'});
     // autoSend=false 时后端只回 stt_final，等用户点发送；

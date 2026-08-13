@@ -65,6 +65,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await c.sendText(text);
   }
 
+  /// 手指抬起/被系统取消：结束录音（幂等，重复调用无害）
+  void _finishHold() {
+    if (!_holding) return;
+    _holding = false;
+    HapticFeedback.lightImpact();
+    c.stopListening();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -257,23 +265,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     onPressed: c.interrupt,
                   ),
                 Expanded(
-                  child: GestureDetector(
-                    onLongPressStart: (_) {
+                  // 原始指针事件（不用 GestureDetector 长按）：
+                  // 按下立即开录、抬起/取消立即停止，状态和真实录音严格同步
+                  child: Listener(
+                    behavior: HitTestBehavior.opaque,
+                    onPointerDown: (_) {
                       _holding = true;
-                      HapticFeedback.mediumImpact(); // 像微信一样：按住震一下
+                      HapticFeedback.mediumImpact();
                       c.startListening();
                     },
-                    onLongPressEnd: (_) {
-                      _holding = false;
-                      HapticFeedback.lightImpact();
-                      c.stopListening();
-                    },
-                    // 关键：手势被取消（手指滑动/系统打断）时必须停录音，
-                    // 否则麦克风一直开着 → 噪声被识别成标点/英文自动发送
-                    onLongPressCancel: () {
-                      _holding = false;
-                      c.stopListening();
-                    },
+                    onPointerUp: (_) => _finishHold(),
+                    onPointerCancel: (_) => _finishHold(),
                     child: Container(
                       height: 48,
                       decoration: BoxDecoration(
@@ -284,7 +286,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       ),
                       child: Center(
                         child: Text(
-                          listening ? '松开结束' : '按住说话',
+                          listening ? '松开结束 · 录音中' : '按住说话',
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,

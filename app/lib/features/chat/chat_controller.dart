@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/audio/player_service.dart';
 import '../../core/audio/recorder_service.dart';
@@ -46,6 +47,10 @@ class ChatController extends ChangeNotifier {
   bool wsConnected = false;
 
   Timer? _listenTimer; // 录音兜底：手势丢失时最多录 30 秒
+  DateTime? _recordStartedAt;
+
+  /// 录音剩余秒数：最后 10 秒在按键上倒计时显示
+  int recordRemaining = 0;
 
   void init() {
     ws.onJson = _onJson;
@@ -139,30 +144,46 @@ class ChatController extends ChangeNotifier {
     if (phase == ChatPhase.listening) return;
     // 先亮红灯再启动：UI 反馈即时；启动失败（如权限被拒）回退到 idle
     phase = ChatPhase.listening;
+    recordRemaining = 30;
     notifyListeners();
     ws.sendAudioStart();
     try {
       await recorder.start(onChunk: ws.sendAudio);
     } catch (e) {
       phase = ChatPhase.idle;
+      recordRemaining = 0;
       lines.add(ChatLine('note', e.toString()));
       notifyListeners();
       return;
     }
-    // 兜底：指针丢失/系统打断时最多录 30 秒自动停
+    _startRecordTicker();
+  }
+
+  /// 每秒刷新剩余时间；剩 10 秒时重震提醒；到 0 自动停
+  void _startRecordTicker() {
     _listenTimer?.cancel();
-    _listenTimer = Timer(const Duration(seconds: 30), () {
-      if (phase == ChatPhase.listening) {
+    _recordStartedAt = DateTime.now();
+    var warned = false;
+    _listenTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final elapsed = DateTime.now().difference(_recordStartedAt!).inSeconds;
+      final remaining = 30 - elapsed;
+      recordRemaining = remaining > 0 ? remaining : 0;
+      if (remaining == 10 && !warned) {
+        warned = true;
+        HapticFeedback.heavyImpact();
+      }
+      if (remaining <= 0) {
         stopListening();
         lines.add(ChatLine('note', '录音超时，已自动停止'));
-        notifyListeners();
       }
+      notifyListeners();
     });
   }
 
   Future<void> stopListening() async {
     if (phase != ChatPhase.listening) return;
     _listenTimer?.cancel();
+    recordRemaining = 0;
     await recorder.stop();
     ws.sendJson({'type': 'audio_end'});
     // autoSend=false 时后端只回 stt_final，等用户点发送；
@@ -199,6 +220,7 @@ class ChatController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _listenTimer?.cancel();
     ws.close();
     super.dispose();
   }

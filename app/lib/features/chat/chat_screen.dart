@@ -286,7 +286,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       ),
                       child: Center(
                         child: Text(
-                          listening ? '松开结束 · 录音中' : '按住说话',
+                          listening
+                              ? (c.recordRemaining > 0 && c.recordRemaining <= 10
+                                  ? '松开结束 · 还剩 ${c.recordRemaining}s'
+                                  : '松开结束 · 录音中')
+                              : '按住说话',
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,

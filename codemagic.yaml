@@ -55,8 +55,23 @@ workflows:
       # 手动生成 Generated.xcconfig + pod install + 直接 xcodebuild（命令行为 unsigned 显式开关）
       - name: Generate Xcode config manually
         script: |
+          # 解析 flutter 真实路径（Codemagic 上 which 返回的可能是符号链接）
           FLUTTER_BIN=$(which flutter)
-          FLUTTER_ROOT=$(cd "$(dirname "$FLUTTER_BIN")/.." && pwd)
+          FLUTTER_REAL=$(readlink -f "$FLUTTER_BIN" 2>/dev/null || echo "$FLUTTER_BIN")
+          FLUTTER_ROOT=$(cd "$(dirname "$FLUTTER_REAL")/.." && pwd)
+          # 自校验：podhelper 必须存在，否则用环境变量兜底
+          if [ ! -f "$FLUTTER_ROOT/packages/flutter_tools/bin/podhelper" ]; then
+            if [ -n "$FLUTTER_ROOT" ] && [ -f "$FLUTTER_ROOT/packages/flutter_tools/bin/podhelper" ]; then
+              FLUTTER_ROOT="$FLUTTER_ROOT"
+            elif [ -f "$HOME/programs/flutter/packages/flutter_tools/bin/podhelper" ]; then
+              FLUTTER_ROOT="$HOME/programs/flutter"
+            else
+              echo "ERROR: 找不到 Flutter SDK 的 podhelper"
+              ls -la "$FLUTTER_ROOT" 2>/dev/null | head -5
+              find / -maxdepth 6 -path "*/flutter_tools/bin/podhelper" 2>/dev/null | head -3
+              exit 1
+            fi
+          fi
           echo "FLUTTER_ROOT=$FLUTTER_ROOT"
           cat > ios/Flutter/Generated.xcconfig << EOF
           FLUTTER_ROOT=$FLUTTER_ROOT

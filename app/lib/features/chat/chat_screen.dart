@@ -16,7 +16,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _textCtrl = TextEditingController();
   bool _holding = false;
   int _syncedInputVersion = -1;
@@ -24,9 +24,27 @@ class _ChatScreenState extends State<ChatScreen> {
   ChatController get c => widget.controller;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _textCtrl.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 切到后台时若还在录音，立刻停止——否则麦克风一直开着，
+    // 环境噪声会被 STT 幻觉成句号/英文单词自动发出去
+    if (state != AppLifecycleState.resumed &&
+        c.phase == ChatPhase.listening) {
+      _holding = false;
+      c.stopListening();
+    }
   }
 
   /// 语音识别文本 → 预填输入框（可修改后发送）
@@ -248,6 +266,12 @@ class _ChatScreenState extends State<ChatScreen> {
                     onLongPressEnd: (_) {
                       _holding = false;
                       HapticFeedback.lightImpact();
+                      c.stopListening();
+                    },
+                    // 关键：手势被取消（手指滑动/系统打断）时必须停录音，
+                    // 否则麦克风一直开着 → 噪声被识别成标点/英文自动发送
+                    onLongPressCancel: () {
+                      _holding = false;
                       c.stopListening();
                     },
                     child: Container(

@@ -30,7 +30,11 @@ class RecorderService {
   Future<void> stop() async {
     await _sub?.cancel();
     _sub = null;
-    await _recorder.stop();
+    try {
+      await _recorder.stop();
+    } catch (_) {
+      // 未在录音时调用 stop 可能抛错，忽略
+    }
   }
 
   Future<void> dispose() async {

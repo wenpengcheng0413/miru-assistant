@@ -51,10 +51,26 @@ workflows:
         script: flutter pub get
       - name: Update CocoaPods specs repo
         script: pod repo update || true
-      # 关键：不用 flutter build ios（它做完还会做"可部署性"校验，unsigned 必挂）
-      # 改为 config-only 生成工程配置，再用 xcodebuild 显式 unsigned 直接构建
-      - name: Prepare Xcode config
-        script: flutter build ios --config-only
+      # 连 flutter build ios --config-only 都会做签名证书校验 → 完全绕开 flutter 工具：
+      # 手动生成 Generated.xcconfig + pod install + 直接 xcodebuild（命令行为 unsigned 显式开关）
+      - name: Generate Xcode config manually
+        script: |
+          FLUTTER_BIN=$(which flutter)
+          FLUTTER_ROOT=$(cd "$(dirname "$FLUTTER_BIN")/.." && pwd)
+          echo "FLUTTER_ROOT=$FLUTTER_ROOT"
+          cat > ios/Flutter/Generated.xcconfig << EOF
+          FLUTTER_ROOT=$FLUTTER_ROOT
+          FLUTTER_APPLICATION_PATH=$PWD
+          COCOAPODS_PARALLEL_CODE_SIGN=true
+          FLUTTER_BUILD_DIR=build
+          FLUTTER_BUILD_NAME=0.1.0
+          FLUTTER_BUILD_NUMBER=1
+          DART_DEFINES=
+          PACKAGE_CONFIG=$PWD/.dart_tool/package_config.json
+          EOF
+          cat ios/Flutter/Generated.xcconfig
+      - name: Pod install
+        script: cd ios && pod install
       - name: Build app bundle (xcodebuild, unsigned)
         script: |
           xcodebuild -workspace ios/Runner.xcworkspace \

@@ -8,7 +8,9 @@ workflows:
     max_build_duration: 60
     working_directory: app
     environment:
-      flutter: stable
+      # 固定 3.41.7：机器上存在多套 SDK（3.47 的 podhelper 布局已变），
+      # 必须保证 pub get 与 xcodebuild 用同一套，否则 Dart 语言版本冲突（language 3.12 too high）
+      flutter: 3.41.7
       xcode: latest
       cocoapods: default
     triggering:
@@ -58,13 +60,7 @@ workflows:
           echo "=== 诊断：flutter 安装情况 ==="
           which flutter
           flutter --version
-          echo "=== SDK 结构诊断 ==="
-          ls /usr/local | head -20
-          echo "--- packages/ 内容 ---"
-          ls /usr/local/packages 2>/dev/null | head -20
-          echo "--- flutter_tools/bin 内容 ---"
-          ls /usr/local/packages/flutter_tools/bin 2>/dev/null | head -30
-          echo "=== 全盘搜索 podhelper*（Ruby require 会自动补 .rb 后缀）==="
+          echo "=== 搜索 podhelper 真实位置（须与 PATH 上的 flutter 是同一 SDK）==="
           PODHELPER=$(find /usr/local /opt "$HOME" -name "podhelper*" 2>/dev/null | head -1)
           echo "PODHELPER=$PODHELPER"
           if [ -z "$PODHELPER" ]; then

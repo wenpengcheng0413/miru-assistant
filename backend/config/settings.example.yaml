@@ -22,6 +22,7 @@ stt:
   language: auto          # auto/zh/yue/en（SenseVoice 单模型支持中粤英混合）
   num_threads: 4
   partial_interval_ms: 800   # 说话期间每 800ms 出一次部分识别结果
+  idle_unload_seconds: 300  # 闲置 N 秒后卸载语音模型释放内存（0=常驻）
   vad:
     engine: energy        # energy | silero（silero 未实现前用 energy）
     threshold_db: 6.0     # 高于噪声底的分贝数算说话

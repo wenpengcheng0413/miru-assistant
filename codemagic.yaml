@@ -51,13 +51,26 @@ workflows:
         script: flutter pub get
       - name: Update CocoaPods specs repo
         script: pod repo update || true
-      - name: Build iOS app (unsigned)
-        script: flutter build ios --release --no-codesign
+      # 关键：不用 flutter build ios（它做完还会做"可部署性"校验，unsigned 必挂）
+      # 改为 config-only 生成工程配置，再用 xcodebuild 显式 unsigned 直接构建
+      - name: Prepare Xcode config
+        script: flutter build ios --config-only
+      - name: Build app bundle (xcodebuild, unsigned)
+        script: |
+          xcodebuild -workspace ios/Runner.xcworkspace \
+            -scheme Runner -configuration Release -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
       - name: Package IPA (Payload/ditto)
         script: |
+          APP_PATH=$(find build -name "Runner.app" -path "*Release-iphoneos*" -type d | head -1)
+          echo "APP_PATH=$APP_PATH"
+          if [ -z "$APP_PATH" ]; then echo "ERROR: Runner.app not found"; exit 1; fi
+          mkdir -p build/ios/ipa
           rm -rf Payload
           mkdir Payload
-          cp -R build/ios/iphoneos/Runner.app Payload/
+          cp -R "$APP_PATH" Payload/
           ditto -c -k --keepParent Payload build/ios/ipa/Miru.ipa
           rm -rf Payload
           ls -la build/ios/ipa/

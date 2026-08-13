@@ -55,23 +55,19 @@ workflows:
       # 手动生成 Generated.xcconfig + pod install + 直接 xcodebuild（命令行为 unsigned 显式开关）
       - name: Generate Xcode config manually
         script: |
-          # 解析 flutter 真实路径（Codemagic 上 which 返回的可能是符号链接）
-          FLUTTER_BIN=$(which flutter)
-          FLUTTER_REAL=$(readlink -f "$FLUTTER_BIN" 2>/dev/null || echo "$FLUTTER_BIN")
-          FLUTTER_ROOT=$(cd "$(dirname "$FLUTTER_REAL")/.." && pwd)
-          # 自校验：podhelper 必须存在，否则用环境变量兜底
-          if [ ! -f "$FLUTTER_ROOT/packages/flutter_tools/bin/podhelper" ]; then
-            if [ -n "$FLUTTER_ROOT" ] && [ -f "$FLUTTER_ROOT/packages/flutter_tools/bin/podhelper" ]; then
-              FLUTTER_ROOT="$FLUTTER_ROOT"
-            elif [ -f "$HOME/programs/flutter/packages/flutter_tools/bin/podhelper" ]; then
-              FLUTTER_ROOT="$HOME/programs/flutter"
-            else
-              echo "ERROR: 找不到 Flutter SDK 的 podhelper"
-              ls -la "$FLUTTER_ROOT" 2>/dev/null | head -5
-              find / -maxdepth 6 -path "*/flutter_tools/bin/podhelper" 2>/dev/null | head -3
-              exit 1
-            fi
+          echo "=== 诊断：flutter 安装情况 ==="
+          which flutter
+          flutter --version
+          echo "=== 搜索 podhelper 真实位置 ==="
+          PODHELPER=$(find /usr/local /opt "$HOME" -path "*/packages/flutter_tools/bin/podhelper" \( -type f -o -type l \) 2>/dev/null | head -1)
+          echo "PODHELPER=$PODHELPER"
+          if [ -z "$PODHELPER" ]; then
+            echo "ERROR: 未找到 podhelper，全盘兜底搜索"
+            find / -path "*/flutter_tools/bin/podhelper" 2>/dev/null | head -5
+            exit 1
           fi
+          # 反向推导 SDK 根：podhelper 前面的 packages/flutter_tools 之前就是 SDK 根
+          FLUTTER_ROOT=$(python3 -c "import sys; print('$PODHELPER'.split('/packages/flutter_tools')[0])")
           echo "FLUTTER_ROOT=$FLUTTER_ROOT"
           cat > ios/Flutter/Generated.xcconfig << EOF
           FLUTTER_ROOT=$FLUTTER_ROOT

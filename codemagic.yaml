@@ -41,6 +41,12 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST"
           cat "$PLIST"
+      # unsigned 设备构建必须显式禁用签名（否则报 "requires a selected Development Team"）
+      - name: Disable code signing
+        script: |
+          echo "CODE_SIGNING_ALLOWED=NO" >> ios/Flutter/Release.xcconfig
+          echo "CODE_SIGNING_ALLOWED=NO" >> ios/Flutter/Debug.xcconfig
+          cat ios/Flutter/Release.xcconfig
       - name: Install Flutter dependencies
         script: flutter pub get
       - name: Update CocoaPods specs repo

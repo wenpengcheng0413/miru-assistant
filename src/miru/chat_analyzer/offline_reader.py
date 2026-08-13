@@ -516,12 +516,13 @@ class OfflineWeChatDB:
                 text = c
             if not text or not text.strip():
                 continue
-            # "sender_id\\ncontent" 格式
+            # "sender_id\ncontent" 格式；微信 4.x 群消息可能是 "wxid_xxx:\ncontent"
             if "\n" in text:
                 head, _, rest = text.partition("\n")
                 try:
                     return int(head.strip()), rest.strip()
                 except ValueError:
-                    pass
+                    if re.match(r"^wxid_[A-Za-z0-9]+[:：]?$", head.strip()):
+                        return int(d.get("real_sender_id") or 0), rest.strip()
             return int(d.get("real_sender_id") or 0), text.strip()
         return int(d.get("real_sender_id") or 0), ""

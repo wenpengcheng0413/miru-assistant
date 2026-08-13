@@ -80,6 +80,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _syncPendingInput();
           return Column(
             children: [
+              if (!c.wsConnected) _offlineBanner(context),
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -118,6 +119,32 @@ class _ChatScreenState extends State<ChatScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// 未连接服务器时的顶部横幅：点按直接进设置
+  Widget _offlineBanner(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.errorContainer,
+      child: InkWell(
+        onTap: () => _openSettings(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(Icons.cloud_off, size: 16, color: scheme.onErrorContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '未连接服务器（每 3 秒自动重连）· 点此检查设置',
+                  style: TextStyle(fontSize: 13, color: scheme.onErrorContainer),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

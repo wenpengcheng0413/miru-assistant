@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
@@ -20,9 +22,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _testResult = '';
 
   Dio get _dio => Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 5),
-        receiveTimeout: const Duration(seconds: 8),
+        connectTimeout: const Duration(seconds: 12),
+        receiveTimeout: const Duration(seconds: 12),
       ));
+
+  /// 去尾部斜杠：`http://x:8765/` → `http://x:8765`，避免拼出 //api/health
+  String get _cleanUrl => _urlCtrl.text.trim().replaceAll(RegExp(r'/+$'), '');
 
   Map<String, String> get _headers => {
         'Authorization': 'Bearer ${_tokenCtrl.text.trim()}',
@@ -112,11 +117,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const Divider(height: 32),
           Text('成本报表（近 7 天）', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          _CostPanel(headers: _headers, baseUrl: _urlCtrl.text.trim()),
+          // key 绑定当前地址：保存后自动用新地址重新加载
+          _CostPanel(
+            key: ValueKey('cost-$_cleanUrl'),
+            headers: _headers,
+            baseUrl: _cleanUrl,
+          ),
           const Divider(height: 32),
           Text('长期记忆（profile）', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          _MemoryPanel(headers: _headers, baseUrl: _urlCtrl.text.trim()),
+          _MemoryPanel(
+            key: ValueKey('memory-$_cleanUrl'),
+            headers: _headers,
+            baseUrl: _cleanUrl,
+          ),
         ],
       ),
     );
@@ -124,7 +138,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
-    widget.config.baseUrl = _urlCtrl.text.trim();
+    widget.config.baseUrl = _cleanUrl;
     widget.config.token = _tokenCtrl.text.trim();
     await widget.config.save();
     if (mounted) {
@@ -140,19 +154,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _testResult = '测试中…');
     try {
       final resp = await _dio.get(
-        '${_urlCtrl.text.trim()}/api/health',
+        '$_cleanUrl/api/health',
         options: Options(headers: _headers),
       );
       setState(() => _testResult = '✅ 连接成功：${resp.data}');
     } catch (e) {
-      setState(() => _testResult = '❌ 连接失败：$e');
+      setState(() => _testResult = '❌ ${friendlyNetError(e)}');
     }
   }
 }
 
+/// 把 Dio 网络异常翻译成用户能照着做的人话
+String friendlyNetError(Object e) {
+  if (e is DioException) {
+    final cause = e.error;
+    if (e.type == DioExceptionType.connectionTimeout) {
+      return '连接超时：手机与电脑可能不在同一 Wi-Fi，或电脑防火墙拦截了端口 8765';
+    }
+    if (e.type == DioExceptionType.receiveTimeout) {
+      return '响应超时：服务器收到了请求但没有回应，后端可能卡住了';
+    }
+    if (cause is SocketException) {
+      final code = cause.osError?.errorCode ?? -1;
+      if (code == 51 || cause.message.toLowerCase().contains('unreachable')) {
+        return '连不上局域网：① 手机与电脑连同一个 Wi-Fi ② iOS 已允许本地网络权限'
+            '（设置→隐私与安全性→本地网络，打开 LiveContainer / Miru）'
+            ' ③ 电脑防火墙放行 8765 端口';
+      }
+      if (code == 61 || cause.message.toLowerCase().contains('refused')) {
+        return '连接被拒绝：后端没启动，或端口不是 8765';
+      }
+    }
+  }
+  return e.toString();
+}
+
 /// 成本面板：/api/cost/report
 class _CostPanel extends StatefulWidget {
-  const _CostPanel({required this.headers, required this.baseUrl});
+  const _CostPanel({super.key, required this.headers, required this.baseUrl});
 
   final Map<String, String> headers;
   final String baseUrl;
@@ -172,7 +211,10 @@ class _CostPanelState extends State<_CostPanel> {
 
   Future<void> _load() async {
     try {
-      final dio = Dio();
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 12),
+      ));
       final resp = await dio.get(
         '${widget.baseUrl}/api/cost/report?days=7',
         options: Options(headers: widget.headers),
@@ -184,17 +226,28 @@ class _CostPanelState extends State<_CostPanel> {
             '${by.entries.map((e) => '${e.key}: ¥${e.value}').join('，')}';
       });
     } catch (e) {
-      setState(() => _text = '加载失败：$e');
+      setState(() => _text = '加载失败：${friendlyNetError(e)}');
     }
   }
 
+  void _reload() {
+    setState(() => _text = '加载中…');
+    _load();
+  }
+
   @override
-  Widget build(BuildContext context) => Text(_text, style: const TextStyle(fontSize: 13));
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_text, style: const TextStyle(fontSize: 13)),
+          TextButton(onPressed: _reload, child: const Text('重新加载')),
+        ],
+      );
 }
 
 /// 记忆面板：/api/memory?scope=profile
 class _MemoryPanel extends StatefulWidget {
-  const _MemoryPanel({required this.headers, required this.baseUrl});
+  const _MemoryPanel({super.key, required this.headers, required this.baseUrl});
 
   final Map<String, String> headers;
   final String baseUrl;
@@ -214,7 +267,10 @@ class _MemoryPanelState extends State<_MemoryPanel> {
 
   Future<void> _load() async {
     try {
-      final dio = Dio();
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 12),
+      ));
       final resp = await dio.get(
         '${widget.baseUrl}/api/memory?scope=profile',
         options: Options(headers: widget.headers),
@@ -226,10 +282,21 @@ class _MemoryPanelState extends State<_MemoryPanel> {
             : entries.map((e) => '${e['key']} = ${e['value']}').join('\n');
       });
     } catch (e) {
-      setState(() => _text = '加载失败：$e');
+      setState(() => _text = '加载失败：${friendlyNetError(e)}');
     }
   }
 
+  void _reload() {
+    setState(() => _text = '加载中…');
+    _load();
+  }
+
   @override
-  Widget build(BuildContext context) => Text(_text, style: const TextStyle(fontSize: 13));
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_text, style: const TextStyle(fontSize: 13)),
+          TextButton(onPressed: _reload, child: const Text('重新加载')),
+        ],
+      );
 }

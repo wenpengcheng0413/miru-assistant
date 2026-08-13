@@ -42,15 +42,23 @@ class ChatController extends ChangeNotifier {
   String pendingInput = '';
   int pendingInputVersion = 0;
 
+  /// WS 是否已连上（聊天页顶部显示离线横幅）
+  bool wsConnected = false;
+
   void init() {
     ws.onJson = _onJson;
     ws.onAudio = player.feedAudio;
+    ws.onConnected = () {
+      wsConnected = true;
+      notifyListeners();
+    };
     ws.onDisconnected = () {
+      wsConnected = false;
       if (phase != ChatPhase.idle) {
         lines.add(ChatLine('note', '连接断开，正在重连…'));
         phase = ChatPhase.idle;
-        notifyListeners();
       }
+      notifyListeners();
       _reconnect();
     };
   }

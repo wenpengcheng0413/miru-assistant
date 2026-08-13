@@ -58,16 +58,28 @@ workflows:
           echo "=== 诊断：flutter 安装情况 ==="
           which flutter
           flutter --version
-          echo "=== 搜索 podhelper 真实位置 ==="
-          PODHELPER=$(find /usr/local /opt "$HOME" -path "*/packages/flutter_tools/bin/podhelper" \( -type f -o -type l \) 2>/dev/null | head -1)
+          echo "=== SDK 结构诊断 ==="
+          ls /usr/local | head -20
+          echo "--- packages/ 内容 ---"
+          ls /usr/local/packages 2>/dev/null | head -20
+          echo "--- flutter_tools/bin 内容 ---"
+          ls /usr/local/packages/flutter_tools/bin 2>/dev/null | head -30
+          echo "=== 全盘搜索 podhelper*（Ruby require 会自动补 .rb 后缀）==="
+          PODHELPER=$(find /usr/local /opt "$HOME" -name "podhelper*" 2>/dev/null | head -1)
           echo "PODHELPER=$PODHELPER"
           if [ -z "$PODHELPER" ]; then
-            echo "ERROR: 未找到 podhelper，全盘兜底搜索"
-            find / -path "*/flutter_tools/bin/podhelper" 2>/dev/null | head -5
+            echo "ERROR: 未找到 podhelper*，打印全部候选"
+            find / -name "podhelper*" 2>/dev/null | head -10
             exit 1
           fi
-          # 反向推导 SDK 根：podhelper 前面的 packages/flutter_tools 之前就是 SDK 根
-          FLUTTER_ROOT=$(python3 -c "import sys; print('$PODHELPER'.split('/packages/flutter_tools')[0])")
+          # 反向推导 SDK 根：podhelper 前面的 /packages/flutter_tools 之前就是 SDK 根
+          FLUTTER_ROOT=$(python3 -c "
+          import sys
+          p = '$PODHELPER'
+          idx = p.find('/packages/flutter_tools')
+          if idx < 0:
+              idx = p.find('/flutter_tools')
+          print(p[:idx] if idx > 0 else 'UNKNOWN')")
           echo "FLUTTER_ROOT=$FLUTTER_ROOT"
           cat > ios/Flutter/Generated.xcconfig << EOF
           FLUTTER_ROOT=$FLUTTER_ROOT

@@ -1,0 +1,7 @@
+# Flutter/Dart 构建产物
+.dart_tool/
+build/
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+*.iml

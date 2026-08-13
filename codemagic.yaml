@@ -1,0 +1,59 @@
+# Miru iOS 客户端构建（复刻 cashew-budget-mobile-app 的已验证配方）
+# Codemagic 云端 Mac 构建 unsigned IPA → 下载后导入 LiveContainer
+# 触发：push 到 master 或打 ios-v* 标签
+workflows:
+  miru-ios-build:
+    name: Miru iOS Sideload IPA Build
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    working_directory: app
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    triggering:
+      events:
+        - push
+        - tag
+      branch_patterns:
+        - pattern: master
+          include: true
+      tag_patterns:
+        - pattern: ios-v*
+          include: true
+    scripts:
+      # app/ 只有 pubspec + lib（无 ios/ 平台壳）：在 /tmp 生成后只拷 ios/ 进来，
+      # 避免 flutter create . 覆盖我们的 README 等文件
+      - name: Generate iOS platform shell
+        script: |
+          flutter create --platforms=ios --project-name miru_app --org com.miru /tmp/miru_shell
+          rm -rf ios
+          cp -R /tmp/miru_shell/ios ios
+          rm -rf /tmp/miru_shell
+          ls -la ios/
+      # 关键：注入麦克风/本地网络权限与 ATS 例外（没有麦克风描述，录音必崩）
+      - name: Patch Info.plist permissions
+        script: |
+          PLIST=ios/Runner/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Miru 需要麦克风来听你说话'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Miru 需要连接你电脑上的后端服务'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST"
+          cat "$PLIST"
+      - name: Install Flutter dependencies
+        script: flutter pub get
+      - name: Update CocoaPods specs repo
+        script: pod repo update || true
+      - name: Build iOS app (unsigned)
+        script: flutter build ios --release --no-codesign
+      - name: Package IPA (Payload/ditto)
+        script: |
+          rm -rf Payload
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          ditto -c -k --keepParent Payload build/ios/ipa/Miru.ipa
+          rm -rf Payload
+          ls -la build/ios/ipa/
+    artifacts:
+      - build/ios/ipa/Miru.ipa

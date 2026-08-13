@@ -1,0 +1,26 @@
+name: miru_app
+description: Miru 语音 AI 助手客户端（iPhone 语音入口）
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  web_socket_channel: ^3.0.1
+  record: ^5.1.2
+  audioplayers: ^6.1.0
+  dio: ^5.4.3
+  shared_preferences: ^2.2.3
+  flutter_secure_storage: ^9.0.0
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,261 @@
+import 'package:flutter/material.dart';
+
+import '../../core/audio/player_service.dart';
+import '../../core/config.dart';
+import 'chat_controller.dart';
+import '../settings/settings_screen.dart';
+
+class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key, required this.controller, required this.player});
+
+  final ChatController controller;
+  final PlayerService player;
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  final TextEditingController _textCtrl = TextEditingController();
+  bool _holding = false;
+  int _syncedInputVersion = -1;
+
+  ChatController get c => widget.controller;
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    super.dispose();
+  }
+
+  /// 语音识别文本 → 预填输入框（可修改后发送）
+  void _syncPendingInput() {
+    if (c.pendingInputVersion == _syncedInputVersion) return;
+    _syncedInputVersion = c.pendingInputVersion;
+    if (c.pendingInput.isNotEmpty) {
+      _textCtrl.text = c.pendingInput;
+      _textCtrl.selection =
+          TextSelection.collapsed(offset: _textCtrl.text.length);
+    }
+  }
+
+  Future<void> _send() async {
+    final text = _textCtrl.text.trim();
+    if (text.isEmpty) return;
+    _textCtrl.clear();
+    await c.sendText(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Miru'),
+        actions: [
+          if (c.lastCost > 0)
+            Center(
+              child: Text(
+                '本轮 ¥${c.lastCost.toStringAsFixed(3)}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          // 语音回复快捷开关
+          IconButton(
+            tooltip: c.config.ttsEnabled ? '关闭语音回复' : '开启语音回复',
+            icon: Icon(c.config.ttsEnabled
+                ? Icons.volume_up_outlined
+                : Icons.volume_off_outlined),
+            onPressed: c.toggleTts,
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => _openSettings(context),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: AnimatedBuilder(
+        animation: c,
+        builder: (context, _) {
+          _syncPendingInput();
+          return Column(
+            children: [
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  itemCount: c.lines.length + 1,
+                  itemBuilder: (context, i) {
+                    if (i == c.lines.length) return _liveArea();
+                    final line = c.lines[i];
+                    return Align(
+                      alignment: line.kind == 'user'
+                          ? Alignment.centerRight
+                          : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: line.kind == 'user'
+                              ? Theme.of(context).colorScheme.primaryContainer
+                              : line.kind == 'note'
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(line.text,
+                            style: const TextStyle(fontSize: 15)),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              _bottomBar(context),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// 识别中的半透明字 + 流式回答字幕 + 工具状态
+  Widget _liveArea() {
+    final parts = <Widget>[];
+    if (c.partialText.isNotEmpty) {
+      parts.add(Text(
+        c.partialText,
+        style: TextStyle(
+          fontSize: 15,
+          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.45),
+        ),
+      ));
+    }
+    if (c.miruText.isNotEmpty) {
+      parts.add(Text(c.miruText, style: const TextStyle(fontSize: 15)));
+    }
+    if (c.toolStatus.isNotEmpty) {
+      parts.add(Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 8),
+            Text(c.toolStatus, style: const TextStyle(fontSize: 13)),
+          ],
+        ),
+      ));
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: parts);
+  }
+
+  Widget _bottomBar(BuildContext context) {
+    final thinking = c.phase == ChatPhase.thinking;
+    final speaking = c.phase == ChatPhase.speaking;
+    final listening = c.phase == ChatPhase.listening;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 输入行：识别文本可编辑，可打字发送
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _textCtrl,
+                    minLines: 1,
+                    maxLines: 3,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                    decoration: InputDecoration(
+                      hintText: '说话或输入…',
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.send),
+                  onPressed: (thinking || listening) ? null : _send,
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            // 按住说话 + 打断
+            Row(
+              children: [
+                if (thinking || speaking)
+                  IconButton.filledTonal(
+                    icon: const Icon(Icons.stop),
+                    onPressed: c.interrupt,
+                  ),
+                Expanded(
+                  child: GestureDetector(
+                    onLongPressStart: (_) {
+                      _holding = true;
+                      c.startListening();
+                    },
+                    onLongPressEnd: (_) {
+                      _holding = false;
+                      c.stopListening();
+                    },
+                    child: Container(
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: listening
+                            ? Theme.of(context).colorScheme.errorContainer
+                            : Theme.of(context).colorScheme.primary,
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: Center(
+                        child: Text(
+                          listening ? '松开结束' : '按住说话',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSettings(BuildContext context) async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => SettingsScreen(config: c.config)),
+    );
+    if (changed == true) {
+      // 配置变了：带新参数重新握手
+      c.ws.hello = c.config.hello;
+      c.ws.reconnect();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('配置已保存，正在重新连接…')),
+        );
+      }
+    }
+  }
+}

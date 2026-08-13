@@ -47,7 +47,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// 语音识别文本 → 预填输入框（可修改后发送）
+  /// 语音识别文本 → 预填输入框（可修改后发送）；预填被清空时同步清空输入框
   void _syncPendingInput() {
     if (c.pendingInputVersion == _syncedInputVersion) return;
     _syncedInputVersion = c.pendingInputVersion;
@@ -55,6 +55,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _textCtrl.text = c.pendingInput;
       _textCtrl.selection =
           TextSelection.collapsed(offset: _textCtrl.text.length);
+    } else {
+      _textCtrl.clear();
     }
   }
 

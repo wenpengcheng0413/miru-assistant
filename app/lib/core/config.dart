@@ -8,12 +8,13 @@ class AppConfig {
   static const _kTtsEnabled = 'miru_tts_enabled';
   static const _kAutoSend = 'miru_auto_send';
 
-  static const defaultBaseUrl = 'http://192.168.1.100:8765';
+  static const defaultBaseUrl = 'http://192.168.31.27:8765';
+  static const defaultToken = 'dev-smoke-test-token'; // 与后端 server.token 一致
 
   static final _secure = const FlutterSecureStorage();
 
   String baseUrl = defaultBaseUrl; // 例：https://my-pc.tailxxxx.ts.net:8765
-  String token = '';
+  String token = defaultToken;
 
   /// 语音回复开关：关掉后 Miru 只显示文字，不合成/播放语音
   bool ttsEnabled = true;
@@ -41,7 +42,7 @@ class AppConfig {
     final config = AppConfig();
     final prefs = await SharedPreferences.getInstance();
     config.baseUrl = prefs.getString(_kBaseUrl) ?? defaultBaseUrl;
-    config.token = await _secure.read(key: _kToken) ?? '';
+    config.token = await _secure.read(key: _kToken) ?? defaultToken;
     config.ttsEnabled = prefs.getBool(_kTtsEnabled) ?? true;
     config.autoSend = prefs.getBool(_kAutoSend) ?? true;
     return config;

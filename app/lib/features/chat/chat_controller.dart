@@ -88,13 +88,21 @@ class ChatController extends ChangeNotifier {
         partialText = e['text'] as String? ?? '';
         notifyListeners();
       case 'stt_final':
-        // 识别完成：文本进输入框（可修改）；只有后端确认收到后才显示为用户消息
+        // 识别完成：autoSend=false 时文本进输入框供修改；
+        // autoSend=true 直接由后端管线处理，不占输入框
         partialText = '';
-        pendingInput = e['text'] as String? ?? '';
-        pendingInputVersion++;
+        if (!config.autoSend) {
+          pendingInput = e['text'] as String? ?? '';
+          pendingInputVersion++;
+        }
         notifyListeners();
       case 'user_text':
         _addUserLine(e['text'] as String? ?? '');
+        // 消息已进聊天记录：清掉预填文本（语音自动发送后输入框不留残留）
+        if (pendingInput.isNotEmpty) {
+          pendingInput = '';
+          pendingInputVersion++;
+        }
         notifyListeners();
       case 'llm_delta':
         miruText += e['text'] as String? ?? '';

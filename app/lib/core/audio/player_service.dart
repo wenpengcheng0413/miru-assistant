@@ -13,6 +13,13 @@ class PlayerService {
   bool _playing = false;
   int _played = 0; // 统计（设置页可显示）
 
+  /// 显式音频上下文：忽略 iOS 侧边静音拨片。
+  /// 否则录音插件留下的 playAndRecord 会话会让 TTS 播放被静音键静音。
+  final AudioContext _ttsContext = AudioContextConfig(
+    respectSilence: false,
+    stayAwake: false,
+  ).build();
+
   PlayerService() {
     _player.onPlayerComplete.listen((_) {
       _playing = false;
@@ -35,7 +42,7 @@ class PlayerService {
     _playing = true;
     final bytes = _queue.removeAt(0);
     _played++;
-    await _player.play(BytesSource(bytes));
+    await _player.play(BytesSource(bytes), ctx: _ttsContext);
   }
 
   /// 打断：清空队列与缓冲，立即停止出声

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/audio/player_service.dart';
 import '../../core/config.dart';
@@ -82,37 +83,44 @@ class _ChatScreenState extends State<ChatScreen> {
             children: [
               if (!c.wsConnected) _offlineBanner(context),
               Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                  itemCount: c.lines.length + 1,
-                  itemBuilder: (context, i) {
-                    if (i == c.lines.length) return _liveArea();
-                    final line = c.lines[i];
-                    return Align(
-                      alignment: line.kind == 'user'
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: line.kind == 'user'
-                              ? Theme.of(context).colorScheme.primaryContainer
-                              : line.kind == 'note'
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest
-                                  : Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHigh,
-                          borderRadius: BorderRadius.circular(14),
+                // 点聊天区域收键盘；拖动列表滚动也收键盘
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => FocusScope.of(context).unfocus(),
+                  child: ListView.builder(
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    itemCount: c.lines.length + 1,
+                    itemBuilder: (context, i) {
+                      if (i == c.lines.length) return _liveArea();
+                      final line = c.lines[i];
+                      return Align(
+                        alignment: line.kind == 'user'
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: line.kind == 'user'
+                                ? Theme.of(context).colorScheme.primaryContainer
+                                : line.kind == 'note'
+                                    ? Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainerHighest
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainerHigh,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(line.text,
+                              style: const TextStyle(fontSize: 15)),
                         ),
-                        child: Text(line.text,
-                            style: const TextStyle(fontSize: 15)),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
               ),
               _bottomBar(context),
@@ -234,10 +242,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: GestureDetector(
                     onLongPressStart: (_) {
                       _holding = true;
+                      HapticFeedback.mediumImpact(); // 像微信一样：按住震一下
                       c.startListening();
                     },
                     onLongPressEnd: (_) {
                       _holding = false;
+                      HapticFeedback.lightImpact();
                       c.stopListening();
                     },
                     child: Container(

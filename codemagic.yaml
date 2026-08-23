@@ -51,6 +51,8 @@ workflows:
           cat ios/Flutter/Release.xcconfig
       - name: Install Flutter dependencies
         script: flutter pub get
+      - name: Run Flutter tests
+        script: flutter test
       - name: Update CocoaPods specs repo
         script: pod repo update || true
       # 连 flutter build ios --config-only 都会做签名证书校验 → 完全绕开 flutter 工具：

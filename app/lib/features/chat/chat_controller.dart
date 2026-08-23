@@ -47,6 +47,8 @@ class ChatController extends ChangeNotifier {
   bool wsConnected = false;
 
   Timer? _listenTimer; // 录音兜底：手势丢失时最多录 30 秒
+  int _recordingGeneration = 0;
+  bool _disposed = false;
   DateTime? _recordStartedAt;
 
   /// 录音剩余秒数：最后 10 秒在按键上倒计时显示
@@ -61,9 +63,9 @@ class ChatController extends ChangeNotifier {
     };
     ws.onDisconnected = () {
       wsConnected = false;
-      _listenTimer?.cancel();
       if (phase == ChatPhase.listening) {
-        recorder.stop(); // 断线立刻停录音，防止麦克风泄漏
+        _invalidateRecording();
+        unawaited(recorder.stop()); // 断线立刻停录音，防止麦克风泄漏
         lines.add(ChatLine('note', '连接断开，录音已停止'));
       } else if (phase != ChatPhase.idle) {
         lines.add(ChatLine('note', '连接断开，正在重连…'));
@@ -150,6 +152,7 @@ class ChatController extends ChangeNotifier {
 
   Future<void> startListening() async {
     if (phase == ChatPhase.listening) return;
+    final generation = ++_recordingGeneration;
     // 先亮红灯再启动：UI 反馈即时；启动失败（如权限被拒）回退到 idle
     phase = ChatPhase.listening;
     recordRemaining = 30;
@@ -158,22 +161,48 @@ class ChatController extends ChangeNotifier {
     try {
       await recorder.start(onChunk: ws.sendAudio);
     } catch (e) {
+      // 录音启动期间可能已经松手/断线；旧会话不得覆盖新状态。
+      if (generation != _recordingGeneration || _disposed) return;
+      _invalidateRecording();
       phase = ChatPhase.idle;
-      recordRemaining = 0;
       lines.add(ChatLine('note', e.toString()));
       notifyListeners();
       return;
     }
-    _startRecordTicker();
+
+    // 用户可能在 startStream 完成前已经松手。这时不能再启动超时定时器，
+    // 并且要再停一次刚刚才真正启动的底层录音。
+    if (generation != _recordingGeneration ||
+        phase != ChatPhase.listening ||
+        _disposed) {
+      await recorder.stop();
+      return;
+    }
+    _startRecordTicker(generation);
   }
 
   /// 每秒刷新剩余时间；剩 10 秒时重震提醒；到 0 自动停
-  void _startRecordTicker() {
+  void _startRecordTicker(int generation) {
     _listenTimer?.cancel();
     _recordStartedAt = DateTime.now();
     var warned = false;
-    _listenTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      final elapsed = DateTime.now().difference(_recordStartedAt!).inSeconds;
+    _listenTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      // 过期的录音定时器必须自行熔断，不能循环追加超时提示。
+      if (generation != _recordingGeneration ||
+          phase != ChatPhase.listening ||
+          _disposed) {
+        timer.cancel();
+        if (identical(_listenTimer, timer)) _listenTimer = null;
+        return;
+      }
+
+      final startedAt = _recordStartedAt;
+      if (startedAt == null) {
+        timer.cancel();
+        if (identical(_listenTimer, timer)) _listenTimer = null;
+        return;
+      }
+      final elapsed = DateTime.now().difference(startedAt).inSeconds;
       final remaining = 30 - elapsed;
       recordRemaining = remaining > 0 ? remaining : 0;
       if (remaining == 10 && !warned) {
@@ -181,23 +210,37 @@ class ChatController extends ChangeNotifier {
         HapticFeedback.heavyImpact();
       }
       if (remaining <= 0) {
-        stopListening();
-        lines.add(ChatLine('note', '录音超时，已自动停止'));
+        timer.cancel();
+        if (identical(_listenTimer, timer)) _listenTimer = null;
+        unawaited(_stopListening(timedOut: true));
+        return;
       }
       notifyListeners();
     });
   }
 
-  Future<void> stopListening() async {
+  Future<void> stopListening() => _stopListening();
+
+  Future<void> _stopListening({bool timedOut = false}) async {
     if (phase != ChatPhase.listening) return;
-    _listenTimer?.cancel();
-    recordRemaining = 0;
-    await recorder.stop();
-    ws.sendJson({'type': 'audio_end'});
-    // autoSend=false 时后端只回 stt_final，等用户点发送；
-    // autoSend=true 时后端直接进管线，这里先进 thinking 等 llm_delta/turn_end
+    _invalidateRecording();
+
+    // 先同步切换状态和关闭后端音频闸门，使重复 stop 立即幂等。
     phase = config.autoSend ? ChatPhase.thinking : ChatPhase.idle;
+    if (timedOut) {
+      lines.add(ChatLine('note', '录音超时，已自动停止'));
+    }
+    ws.sendJson({'type': 'audio_end'});
     notifyListeners();
+    await recorder.stop();
+  }
+
+  void _invalidateRecording() {
+    ++_recordingGeneration;
+    _listenTimer?.cancel();
+    _listenTimer = null;
+    _recordStartedAt = null;
+    recordRemaining = 0;
   }
 
   Future<void> sendText(String text) async {
@@ -228,7 +271,8 @@ class ChatController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _listenTimer?.cancel();
+    _disposed = true;
+    _invalidateRecording();
     ws.close();
     super.dispose();
   }

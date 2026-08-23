@@ -25,12 +25,14 @@ class ChatController extends ChangeNotifier {
     required this.ws,
     required this.recorder,
     required this.player,
-  });
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now;
 
   final AppConfig config;
   final WsClient ws;
   final RecorderService recorder;
   final PlayerService player;
+  final DateTime Function() _now;
 
   final List<ChatLine> lines = [];
   ChatPhase phase = ChatPhase.idle;
@@ -184,7 +186,7 @@ class ChatController extends ChangeNotifier {
   /// 每秒刷新剩余时间；剩 10 秒时重震提醒；到 0 自动停
   void _startRecordTicker(int generation) {
     _listenTimer?.cancel();
-    _recordStartedAt = DateTime.now();
+    _recordStartedAt = _now();
     var warned = false;
     _listenTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       // 过期的录音定时器必须自行熔断，不能循环追加超时提示。
@@ -202,7 +204,7 @@ class ChatController extends ChangeNotifier {
         if (identical(_listenTimer, timer)) _listenTimer = null;
         return;
       }
-      final elapsed = DateTime.now().difference(startedAt).inSeconds;
+      final elapsed = _now().difference(startedAt).inSeconds;
       final remaining = 30 - elapsed;
       recordRemaining = remaining > 0 ? remaining : 0;
       if (remaining == 10 && !warned) {

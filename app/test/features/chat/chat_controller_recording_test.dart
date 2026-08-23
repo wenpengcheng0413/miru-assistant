@@ -31,10 +31,12 @@ void main() {
 
   testWidgets('真正超时时只提示一次', (tester) async {
     final recorder = _DelayedRecorder()..completeStart();
-    final controller = _controller(recorder);
+    var now = DateTime(2026, 8, 23);
+    final controller = _controller(recorder, now: () => now);
 
     await controller.startListening();
-    await tester.pump(const Duration(seconds: 35));
+    now = now.add(const Duration(seconds: 35));
+    await tester.pump(const Duration(seconds: 1));
     await tester.pump();
 
     expect(
@@ -44,11 +46,21 @@ void main() {
       1,
     );
     expect(controller.phase, ChatPhase.thinking);
+    await tester.pump(const Duration(seconds: 10));
+    expect(
+      controller.lines
+          .where((line) => line.text == '录音超时，已自动停止')
+          .length,
+      1,
+    );
     controller.dispose();
   });
 }
 
-ChatController _controller(RecorderService recorder) {
+ChatController _controller(
+  RecorderService recorder, {
+  DateTime Function()? now,
+}) {
   final config = AppConfig();
   final ws = WsClient(
     url: config.wsUri,
@@ -60,6 +72,7 @@ ChatController _controller(RecorderService recorder) {
     ws: ws,
     recorder: recorder,
     player: _FakePlayer(),
+    now: now,
   )..wsConnected = true;
 }
 

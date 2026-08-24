@@ -39,8 +39,8 @@ class VoiceSession:
     """
 
     def __init__(self, ctx: SessionContext, stt, websocket: WebSocket, cfg,
-                 recording_timeout: float = 35.0):
-        # 服务端窗口 35s > 客户端 30s 上限：服务端绝不在用户松手前抢先关窗
+                 recording_timeout: float = 65.0):
+        # 服务端窗口 65s > 客户端 60s 上限：服务端绝不在用户松手前抢先关窗
         self.ctx = ctx
         self.stt = stt
         self.ws = websocket
@@ -84,7 +84,7 @@ class VoiceSession:
         elif ev.kind == "speech_ended":
             await self._finalize(ev.speech_pcm)
 
-    async def on_audio_end(self) -> None:
+    async def on_audio_end(self, attachment_ids: list[str] | None = None) -> None:
         """按键说话：松手强制断句，并把本次按键的所有片段合并成一轮发送。"""
         if not self._recording:
             return
@@ -102,7 +102,7 @@ class VoiceSession:
             return
         await _safe_send(self.ws, events.stt_final(combined, self.ctx.stt_latency_ms))
         # 一次按键 = 一轮对话（由上层启动 run 任务）
-        await self._on_final_text(combined)
+        await self._on_final_text(combined, attachment_ids or [])
 
     async def _finalize(self, pcm: bytes) -> None:
         """识别一个 VAD 片段，累积到当前按键会话；实时把累计文本发给客户端显示。"""
@@ -149,7 +149,7 @@ class VoiceSession:
 
         self._partial_task = asyncio.create_task(loop())
 
-    async def _on_final_text(self, text: str) -> None:
+    async def _on_final_text(self, text: str, attachment_ids: list[str]) -> None:
         raise NotImplementedError  # 由 WS 处理器注入
 
 
@@ -198,7 +198,7 @@ async def ws_session(websocket: WebSocket) -> None:
         nonlocal run_task
         run_task = asyncio.create_task(pipeline.run(ctx, text, attachment_ids))
 
-    async def on_final_text(text: str) -> None:
+    async def on_final_text(text: str, attachment_ids: list[str]) -> None:
         # 静音/噪声幻觉兜底：纯标点或空白（如 "."、"。"）不当成输入
         t = (text or "").strip()
         if not t or not any(ch.isalnum() for ch in t):
@@ -210,7 +210,7 @@ async def ws_session(websocket: WebSocket) -> None:
         if ctx.turn_running:
             await _safe_send(websocket, events.server_note("上一轮还没结束，先说一句打断再继续。"))
             return
-        start_run(text)
+        start_run(text, attachment_ids)
 
     voice._on_final_text = on_final_text  # 注入回调
 
@@ -235,7 +235,12 @@ async def ws_session(websocket: WebSocket) -> None:
                 attachment_ids = msg.get("attachment_ids") or []
                 if not isinstance(attachment_ids, list):
                     attachment_ids = []
-                if not text and not attachment_ids:
+                if not text:
+                    if attachment_ids:
+                        await _safe_send(
+                            websocket,
+                            events.server_note("请先输入或说出你希望如何处理附件，再一起发送"),
+                        )
                     continue
                 if ctx.turn_running:
                     await _safe_send(websocket, events.server_note("上一轮还没结束。"))
@@ -244,7 +249,10 @@ async def ws_session(websocket: WebSocket) -> None:
             elif mtype == "audio_start":
                 voice.start_recording()
             elif mtype == "audio_end":
-                await voice.on_audio_end()
+                attachment_ids = msg.get("attachment_ids") or []
+                if not isinstance(attachment_ids, list):
+                    attachment_ids = []
+                await voice.on_audio_end(attachment_ids)
             elif mtype == "interrupt":
                 if run_task and not run_task.done():
                     run_task.cancel()

@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from sqlalchemy import select
 
 from miru_server.core.llm import Done, StreamError, TextDelta, ToolCallsDone, ToolCallSpec, Usage
 from miru_server.core.pipeline import AgentPipeline, SessionContext, new_conversation_id
-from miru_server.db.models import ApiUsage, Message, ToolCall
+from miru_server.db.models import ApiUsage, Attachment, Message, ToolCall
 
 
 class FakeLLM:
@@ -105,3 +106,29 @@ def test_history_loaded_for_multiturn(services):
     messages = services.llm.calls[0][0]
     roles = [m["role"] for m in messages]
     assert roles.count("user") == 2 and roles.count("assistant") == 1
+
+
+def test_document_content_keeps_explicit_instruction_and_large_excerpt(services):
+    pipeline = AgentPipeline(services)
+    document = Attachment(
+        id="a1",
+        conversation_id="c1",
+        filename="budget.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        kind="spreadsheet",
+        size_bytes=100,
+        sha256="0" * 64,
+        local_path="budget.xlsx",
+        status="ready",
+        extracted_text="月度汇总\n" + ("明细数据\n" * 5000),
+        error="",
+        preview_paths="[]",
+    )
+
+    _, content, stored = pipeline._build_user_content("找出支出异常月份", [document])
+    assert content.startswith("找出支出异常月份")
+    assert len(content) > 12_000
+    assert "[附件：budget.xlsx]" in stored
+
+    with pytest.raises(ValueError, match="请先输入或说出"):
+        pipeline._build_user_content("", [document])

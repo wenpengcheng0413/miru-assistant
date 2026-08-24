@@ -86,6 +86,7 @@ class AgentPipeline:
             )
         except (OSError, ValueError) as e:
             await self._send(ctx, "json", events.error("attachment_unavailable", str(e)))
+            ctx.turn_running = False
             return
         await self._send(ctx, "json", events.user_text(user_text))
         await asyncio.to_thread(self._save_message, ctx.conversation_id, "user", stored_text)
@@ -264,12 +265,16 @@ class AgentPipeline:
 
     def _build_user_content(self, user_text: str, attachments: list[Attachment]) -> tuple[str, str | list[dict], str]:
         """图片原样进入 Vision；文件解析结果随后由文档管线作为文本加入。"""
+        instruction = user_text.strip()
+        if not instruction:
+            raise ValueError("请先输入或说出你希望如何处理附件，再一起发送")
         labels = [f"[附件：{item.filename}]" for item in attachments]
-        stored = "\n".join([user_text.strip(), *labels]).strip()
+        stored = "\n".join([instruction, *labels]).strip()
         images = [item for item in attachments if item.kind == "image"]
         documents = [item for item in attachments if item.kind != "image"]
         uses_vision = bool(images)
-        blocks: list[dict] = [{"type": "text", "text": user_text or "请分析我发送的附件。"}]
+        blocks: list[dict] = [{"type": "text", "text": instruction}]
+        remaining_document_chars = self.services.config.attachments.max_extracted_chars_per_turn
         for image in images:
             blocks.append(image_content_block(image.local_path))
         for document in documents:
@@ -281,9 +286,15 @@ class AgentPipeline:
                 blocks.append(image_content_block(preview))
                 uses_vision = True
             if document.extracted_text.strip():
+                excerpt = document.extracted_text[:remaining_document_chars]
+                remaining_document_chars = max(remaining_document_chars - len(excerpt), 0)
                 blocks.append({
                     "type": "text",
-                    "text": f"\n附件《{document.filename}》提取内容：\n{document.extracted_text[:12000]}",
+                    "text": (
+                        f"\n附件《{document.filename}》提取内容：\n{excerpt}"
+                        + ("\n（本轮文档上下文达到上限，后续正文已截断）"
+                           if len(excerpt) < len(document.extracted_text) else "")
+                    ),
                 })
             else:
                 blocks.append({

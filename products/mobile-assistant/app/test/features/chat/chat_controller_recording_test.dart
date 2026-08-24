@@ -20,7 +20,7 @@ void main() {
     await controller.stopListening();
     recorder.completeStart();
     await start;
-    await tester.pump(const Duration(seconds: 35));
+    await tester.pump(const Duration(seconds: 65));
 
     expect(
       controller.lines.where((line) => line.text == '录音超时，已自动停止'),
@@ -36,7 +36,8 @@ void main() {
     final controller = _controller(recorder, now: () => now);
 
     await controller.startListening();
-    now = now.add(const Duration(seconds: 35));
+    expect(controller.recordRemaining, 60);
+    now = now.add(const Duration(seconds: 65));
     await tester.pump(const Duration(seconds: 1));
     await tester.pump();
 
@@ -56,26 +57,103 @@ void main() {
     );
     controller.dispose();
   });
+
+  testWidgets('附件会随语音结束消息一起发送并在服务端确认后移除', (tester) async {
+    final recorder = _DelayedRecorder()..completeStart();
+    final ws = _FakeWsClient();
+    final controller = _controller(recorder, ws: ws)..init();
+    controller.pendingAttachments.add(PendingAttachment(
+      id: 'attachment-1',
+      filename: 'budget.xlsx',
+      kind: 'spreadsheet',
+      sizeBytes: 123,
+    ));
+
+    await controller.startListening();
+    await controller.stopListening();
+
+    expect(ws.jsonMessages.last, {
+      'type': 'audio_end',
+      'attachment_ids': ['attachment-1'],
+    });
+    expect(controller.pendingAttachments, hasLength(1));
+
+    ws.onJson?.call({'type': 'user_text', 'text': '分析这个月的支出'});
+    expect(controller.pendingAttachments, isEmpty);
+    controller.dispose();
+  });
+
+  testWidgets('只有附件没有具体要求时不会自动补写提示词或发送', (tester) async {
+    final recorder = _DelayedRecorder()..completeStart();
+    final ws = _FakeWsClient();
+    final controller = _controller(recorder, ws: ws);
+    controller.pendingAttachments.add(PendingAttachment(
+      id: 'attachment-1',
+      filename: 'budget.xlsx',
+      kind: 'spreadsheet',
+      sizeBytes: 123,
+    ));
+
+    expect(await controller.sendText(''), isFalse);
+    expect(ws.jsonMessages, isEmpty);
+    expect(controller.pendingAttachments, hasLength(1));
+    expect(controller.lines.last.text, contains('请先输入或说出'));
+
+    expect(await controller.sendText('按月份分析收支'), isTrue);
+    expect(ws.jsonMessages.last, {
+      'type': 'text_input',
+      'text': '按月份分析收支',
+      'attachment_ids': ['attachment-1'],
+    });
+    expect(controller.pendingAttachments, isEmpty);
+    controller.dispose();
+  });
 }
 
 ChatController _controller(
   RecorderService recorder, {
   DateTime Function()? now,
+  WsClient? ws,
 }) {
   final config = AppConfig();
-  final ws = WsClient(
+  final client = ws ?? WsClient(
     url: config.wsUri,
     token: config.token,
     hello: config.hello,
   );
   return ChatController(
     config: config,
-    ws: ws,
+    ws: client,
     recorder: recorder,
     player: _FakePlayer(),
     discovery: ServerDiscovery(),
     now: now,
   )..wsConnected = true;
+}
+
+class _FakeWsClient extends WsClient {
+  _FakeWsClient()
+      : super(
+          url: Uri.parse('ws://127.0.0.1:8765/ws/session'),
+          token: 'test',
+          hello: const {},
+        );
+
+  final List<Map<String, dynamic>> jsonMessages = [];
+
+  @override
+  void sendJson(Map<String, dynamic> payload) {
+    jsonMessages.add(Map<String, dynamic>.of(payload));
+  }
+
+  @override
+  void sendAudioStart() {}
+
+  @override
+  void sendAudio(Uint8List chunk) {}
+
+  @override
+  Future<void> close() async {}
 }
 
 class _DelayedRecorder implements RecorderService {

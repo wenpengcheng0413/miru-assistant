@@ -67,18 +67,77 @@ def _read_workbook(path: Path) -> ExtractionResult:
         import openpyxl
     except ImportError:
         return ExtractionResult(error="解析 Excel 需要 openpyxl；请在服务器安装 document 依赖")
+    # 部分 App（包括 Cashew）导出的 xlsx 会把 worksheet dimension 错写成
+    # A1:A1。只读模式因此把真实的 1194x11 明细误报成 1x1；空白封面表则
+    # 可能得到 None。对可疑维度强制重扫 XML，仍保持只读模式以控制大文件内存。
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=False)
-    blocks: list[str] = [f"Excel 文件：{path.name}；工作表 {len(workbook.sheetnames)} 个"]
-    for name in workbook.sheetnames[:20]:
+    for sheet in workbook.worksheets:
+        if (
+            sheet.max_row is None
+            or sheet.max_column is None
+            or (sheet.max_row <= 1 and sheet.max_column <= 1)
+        ):
+            sheet.reset_dimensions()
+            try:
+                sheet.calculate_dimension(force=True)
+            except UnboundLocalError:
+                # openpyxl 对完全空白且无 dimension 的工作表会触发这个已知边界；
+                # 保留 None，后续按空工作表处理即可。
+                pass
+
+    workbook_sheet_count = len(workbook.sheetnames)
+    sheet_sections: list[tuple[int, int, str]] = []
+    sheet_index: list[str] = []
+    for index, name in enumerate(workbook.sheetnames[:20]):
         sheet = workbook[name]
-        blocks.append(f"\n## 工作表：{name}（最大行 {sheet.max_row}，最大列 {sheet.max_column}）")
-        for row in sheet.iter_rows(max_row=min(sheet.max_row, 80), max_col=min(sheet.max_column, 20), values_only=False):
-            values = []
-            for cell in row:
-                value = cell.value
-                values.append("" if value is None else str(value).replace("\n", " ")[:160])
-            if any(values):
-                blocks.append(" | ".join(values))
+        max_row = int(sheet.max_row or 0)
+        max_column = int(sheet.max_column or 0)
+        sheet_index.append(f"{name}（{max_row} 行 × {max_column} 列）")
+        lines = [f"\n## 工作表：{name}（最大行 {max_row}，最大列 {max_column}）"]
+        non_empty_rows = 0
+        row_limit = min(max_row, 5000)
+        column_limit = min(max_column, 60)
+        if row_limit and column_limit:
+            for row in sheet.iter_rows(
+                min_row=1,
+                max_row=row_limit,
+                min_col=1,
+                max_col=column_limit,
+                values_only=True,
+            ):
+                values = [
+                    "" if value is None else str(value).replace("\n", " ")[:240]
+                    for value in row
+                ]
+                if any(values):
+                    non_empty_rows += 1
+                    lines.append(" | ".join(values))
+        if non_empty_rows == 0:
+            lines.append("（空工作表，已跳过）")
+        if max_row > row_limit or max_column > column_limit:
+            lines.append(
+                f"（工作表过大，本机提取上限为 {row_limit} 行 × {column_limit} 列；"
+                "其余内容未进入本轮模型上下文）"
+            )
+        sheet_sections.append((non_empty_rows, index, "\n".join(lines)))
+
+    workbook.close()
+    # 先放紧凑的汇总表，再放大体量明细表，防止明细表耗尽上下文后让后面的
+    # 月度/分类汇总完全不可见。空表只在索引和末尾标明。
+    sheet_sections.sort(key=lambda item: (item[0] == 0, item[0], item[1]))
+    blocks = [
+        f"Excel 文件：{path.name}；工作表 {workbook_sheet_count} 个",
+        "工作表索引：" + "；".join(sheet_index),
+        "以下按数据量从小到大展开，确保所有工作表都被覆盖。",
+    ]
+    for _, _, section in sheet_sections:
+        remaining = 100_000 - len("\n".join(blocks))
+        if remaining <= 0:
+            break
+        if len(section) > remaining:
+            blocks.append(section[: max(remaining - 80, 0)] + "\n（正文达到本机提取上限，已截断）")
+            break
+        blocks.append(section)
     return ExtractionResult(text="\n".join(blocks)[:100_000])
 
 

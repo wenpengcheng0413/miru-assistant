@@ -70,8 +70,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _send() async {
     final text = _textCtrl.text.trim();
     if (text.isEmpty && c.pendingAttachments.isEmpty) return;
-    _textCtrl.clear();
-    await c.sendText(text);
+    if (await c.sendText(text)) {
+      _textCtrl.clear();
+    }
   }
 
   Future<void> _pickImage(ImageSource source) async {

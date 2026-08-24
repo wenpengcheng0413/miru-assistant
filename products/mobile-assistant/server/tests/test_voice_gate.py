@@ -45,7 +45,7 @@ def _make_session(timeout: float = 20.0):
     stt = _FakeSTT()
     voice = VoiceSession(ctx, stt, _FakeWS(), cfg, recording_timeout=timeout)
 
-    async def _noop_final(text: str) -> None:
+    async def _noop_final(text: str, attachment_ids: list[str]) -> None:
         pass
 
     voice._on_final_text = _noop_final   # 生产环境由 WS 处理器注入
@@ -93,8 +93,8 @@ async def test_hold_merges_segments_into_one_turn():
     stt, voice = _make_session()
     finals = []
 
-    async def collect(text: str) -> None:
-        finals.append(text)
+    async def collect(text: str, attachment_ids: list[str]) -> None:
+        finals.append((text, attachment_ids))
 
     voice._on_final_text = collect
     voice.start_recording()
@@ -102,6 +102,6 @@ async def test_hold_merges_segments_into_one_turn():
     await voice.on_audio(b"\x00\x00" * 8000)    # 0.5s 静音 → 断句
     await voice.on_audio(_sine_pcm(1.0))        # 第二段
     assert finals == []                          # 按住期间不触发任何一轮
-    await voice.on_audio_end()
+    await voice.on_audio_end(["attachment-1"])
     assert len(finals) == 1                      # 松手合并成一轮
-    assert finals[0] == "测试 测试"
+    assert finals[0] == ("测试 测试", ["attachment-1"])

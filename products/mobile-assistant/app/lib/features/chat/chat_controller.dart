@@ -69,6 +69,8 @@ class PendingAttachment {
 /// 对话状态机：
 /// idle → listening（按住说话）→ thinking（STT/LLM/工具）→ speaking（播 TTS）→ idle
 class ChatController extends ChangeNotifier {
+  static const int recordingLimitSeconds = 60;
+
   ChatController({
     required this.config,
     required this.ws,
@@ -93,6 +95,7 @@ class ChatController extends ChangeNotifier {
   double lastCost = 0;
   final List<ConversationBrief> conversations = [];
   final List<PendingAttachment> pendingAttachments = [];
+  final Set<String> _voiceAttachmentIdsInFlight = <String>{};
   bool attachmentUploading = false;
   bool conversationsLoading = false;
   String conversationsError = '';
@@ -107,7 +110,7 @@ class ChatController extends ChangeNotifier {
   /// 离线横幅显示的最近一次错误/状态
   String wsStatus = '正在连接…';
 
-  Timer? _listenTimer; // 录音兜底：手势丢失时最多录 30 秒
+  Timer? _listenTimer; // 录音兜底：手势丢失时最多录 60 秒
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   bool _historyLoaded = false;
@@ -445,6 +448,7 @@ class ChatController extends ChangeNotifier {
 
   void removePendingAttachment(String id) {
     pendingAttachments.removeWhere((item) => item.id == id);
+    _voiceAttachmentIdsInFlight.remove(id);
     notifyListeners();
   }
 
@@ -464,6 +468,14 @@ class ChatController extends ChangeNotifier {
         }
         notifyListeners();
       case 'user_text':
+        // 语音任务只有在服务端确认进入管线后才移除附件；识别失败时附件仍留在输入区，
+        // 用户可以直接重试，不需要重新上传。
+        if (_voiceAttachmentIdsInFlight.isNotEmpty) {
+          pendingAttachments.removeWhere(
+            (item) => _voiceAttachmentIdsInFlight.contains(item.id),
+          );
+          _voiceAttachmentIdsInFlight.clear();
+        }
         _addUserLine(e['text'] as String? ?? '');
         // 消息已进聊天记录：清掉预填文本（语音自动发送后输入框不留残留）
         if (pendingInput.isNotEmpty) {
@@ -526,7 +538,7 @@ class ChatController extends ChangeNotifier {
     final generation = ++_recordingGeneration;
     // 先亮红灯再启动：UI 反馈即时；启动失败（如权限被拒）回退到 idle
     phase = ChatPhase.listening;
-    recordRemaining = 30;
+    recordRemaining = recordingLimitSeconds;
     notifyListeners();
     ws.sendAudioStart();
     try {
@@ -575,7 +587,7 @@ class ChatController extends ChangeNotifier {
         return;
       }
       final elapsed = _now().difference(startedAt).inSeconds;
-      final remaining = 30 - elapsed;
+      final remaining = recordingLimitSeconds - elapsed;
       recordRemaining = remaining > 0 ? remaining : 0;
       if (remaining == 10 && !warned) {
         warned = true;
@@ -603,7 +615,16 @@ class ChatController extends ChangeNotifier {
     if (timedOut) {
       lines.add(ChatLine('note', '录音超时，已自动停止'));
     }
-    ws.sendJson({'type': 'audio_end'});
+    final attachmentIds = config.autoSend
+        ? pendingAttachments.map((item) => item.id).toList()
+        : const <String>[];
+    if (attachmentIds.isNotEmpty) {
+      _voiceAttachmentIdsInFlight.addAll(attachmentIds);
+    }
+    ws.sendJson({
+      'type': 'audio_end',
+      if (attachmentIds.isNotEmpty) 'attachment_ids': attachmentIds,
+    });
     notifyListeners();
     await recorder.stop();
   }
@@ -616,25 +637,32 @@ class ChatController extends ChangeNotifier {
     recordRemaining = 0;
   }
 
-  Future<void> sendText(String text) async {
+  Future<bool> sendText(String text) async {
     final value = text.trim();
-    if (value.isEmpty && pendingAttachments.isEmpty) return;
+    if (value.isEmpty) {
+      if (pendingAttachments.isNotEmpty) {
+        lines.add(ChatLine('note', '请先输入或说出你希望如何处理附件，再一起发送'));
+        notifyListeners();
+      }
+      return false;
+    }
     if (!wsConnected) {
       lines.add(ChatLine('note', '未连接服务器，请先在设置页测试连接'));
       notifyListeners();
-      return;
+      return false;
     }
-    final outgoing = value.isEmpty ? '请分析我发送的附件，并给出具体结论。' : value;
-    _addUserLine(outgoing);
+    _addUserLine(value);
     final attachmentIds = pendingAttachments.map((item) => item.id).toList();
     pendingAttachments.clear();
+    _voiceAttachmentIdsInFlight.removeAll(attachmentIds);
     ws.sendJson({
       'type': 'text_input',
-      'text': outgoing,
+      'text': value,
       if (attachmentIds.isNotEmpty) 'attachment_ids': attachmentIds,
     });
     phase = ChatPhase.thinking;
     notifyListeners();
+    return true;
   }
 
   Future<void> interrupt() async {

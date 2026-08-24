@@ -97,3 +97,4 @@ attachments:
   max_file_mb: 50
   max_images_per_turn: 10
   max_preview_pages: 10
+  max_extracted_chars_per_turn: 80000  # 文档正文进入单轮模型上下文的总字符上限

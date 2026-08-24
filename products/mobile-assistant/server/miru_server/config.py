@@ -130,6 +130,7 @@ class AttachmentConfig(BaseModel):
     max_file_mb: int = 50
     max_images_per_turn: int = 10
     max_preview_pages: int = 10
+    max_extracted_chars_per_turn: int = Field(default=80_000, ge=10_000, le=200_000)
 
 
 class AppConfig(BaseModel):

@@ -1,0 +1,99 @@
+# Miru Server 配置模板 —— 复制为 settings.yaml 后修改（真实文件不入库）
+# 支持 ${ENV_VAR} 环境变量引用
+
+server:
+  host: 127.0.0.1        # 默认只监听本机；局域网用 0.0.0.0；永远不要直接暴露公网
+  port: 8765
+  token: "${MIRU_SERVER_TOKEN}"   # 空 = 启动时随机生成（见 README）
+  advertise_lan: true     # 用 Bonjour/mDNS 让手机自动发现电脑和端口
+  service_name: Miru
+
+llm:
+  base_url: https://api.deepseek.com
+  api_key: "${MIRU_DEEPSEEK_API_KEY}"
+  model: deepseek-v4-flash
+  vision_model: deepseek-v4-flash-vision-exp  # 图片/截图专用；文字仍使用上面的稳定模型
+  thinking: false         # 语音场景必须关闭思考模式
+  temperature: 0.7
+  max_tokens: 2048
+  timeout_s: 90
+  max_tool_rounds: 6      # 单轮对话工具循环上限（防死循环烧钱）
+
+stt:
+  engine: sensevoice      # sensevoice | whisper | none（none=纯文本模式）
+  model_dir: ./data/models/sensevoice
+  language: auto          # auto/zh/yue/en（SenseVoice 单模型支持中粤英混合）
+  num_threads: 4
+  partial_interval_ms: 800   # 说话期间每 800ms 出一次部分识别结果
+  idle_unload_seconds: 300  # 闲置 N 秒后卸载语音模型释放内存（0=常驻）
+  vad:
+    engine: energy        # energy | silero（silero 未实现前用 energy）
+    threshold_db: 6.0     # 高于噪声底的分贝数算说话
+    min_speech_ms: 300
+    min_silence_ms: 500   # 断句所需的尾静音
+    max_utterance_ms: 15000
+  whisper:                # 兜底引擎（本机已有 faster-whisper 模型）
+    model: small
+    model_dir: ./data/models
+
+tts:
+  provider: minimax       # minimax | edge | none
+  format: mp3             # mp3（手机 MVP）| pcm（PC 调试脚本用）
+  sample_rate: 32000
+  fallback_to_edge: true  # MiniMax 失败时该句自动切 edge-tts
+  minimax:
+    base_url: https://api.minimaxi.com
+    api_key: "${MINIMAX_API_KEY}"
+    group_id: "${MINIMAX_GROUP_ID}"
+    model: speech-02-turbo
+  edge:
+    voice: zh-CN-XiaoxiaoNeural
+
+memory:
+  auto_extract: true          # 每轮对话后台自动提取用户画像/偏好/知识
+  history_max_chars: 16000    # 每轮带多少历史消息进上下文
+  episodes_max_in_prompt: 5   # system prompt 注入最近 N 条会话摘要
+  summarize_at_rounds: 20     # 对话超过 N 轮时把前半段压缩为摘要
+
+persona:
+  default: miru
+  dir: ./config/persona
+
+tools:
+  enabled:                  # 未列出的工具不会出现在 LLM schema 里
+    - get_current_time
+    - memory_set
+    - memory_get
+    - memory_list
+    - memory_delete
+    - memory_search
+    - api_cost_report
+    - api_budget_set
+    # 微信工具：需要本机安装现有 miru 包（与 V2 同一 venv），且配置好密钥
+    # - wechat_contact_list
+    # - wechat_chat_stats
+    # - wechat_search_messages
+    # - wechat_recent_messages
+    # - wechat_transcribe_voice  # 本机解码并转写微信语音，首次可能加载 STT 模型
+    # - wechat_group_list
+    # - wechat_group_digest
+  wechat:
+    llm_visibility: aggregates   # aggregates | samples | raw（见 ../docs/04-Tool与Skill系统.md）
+    data_root: ""                # 空 = 复用现有 V2 的自动探测/配置
+
+budget:
+  hard_block: false          # true = 超预算直接拒绝 LLM 调用
+
+db:
+  path: ./data/miru_server.db
+
+backup:
+  enabled: true
+  dir: ./data/backups
+  retention_days: 30
+
+attachments:
+  dir: ./data/attachments
+  max_file_mb: 50
+  max_images_per_turn: 10
+  max_preview_pages: 10

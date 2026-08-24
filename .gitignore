@@ -1,49 +1,46 @@
 # ============================================================
-# Miru Assistant — .gitignore
-# 敏感信息与运行时数据一律不上传，保持本地。
+# Miru Assistant monorepo
 # ============================================================
 
-# === 敏感配置（含真实 API Key / Token / 微信数据库密钥）===
-# 只上传 settings.example.yaml（占位符版本）
-config/settings.yaml
+# Product-local secrets and private configuration
+products/daily-report/config/settings.yaml
+products/daily-report/config/contacts.yaml
+products/daily-report/config/database_keys.yaml
+products/mobile-assistant/server/.env
+products/mobile-assistant/server/config/settings.yaml
+products/mobile-assistant/server/config/persona/*.yaml
+!products/mobile-assistant/server/config/persona/*.example.yaml
 
-# === 联系人白名单（含真实联系人信息，隐私）===
-# 只上传 contacts.example.yaml（模板版本）
-config/contacts.yaml
+# Private reports and runtime data
+products/daily-report/data/
+products/daily-report/output/
+products/daily-report/backup/
+products/daily-report/chatlog/
+products/daily-report/tools/
+products/daily-report/docs/reports/
+products/mobile-assistant/server/data/
 
-# === 微信数据库密钥（敏感，自动提取）===
-# 只上传 database_keys.example.yaml（模板版本）
-config/database_keys.yaml
-
-# === 运行时数据（微信聊天消息库、日志、密钥文件、备份）===
-data/
-chatlog/
-backup/
-
-# === Chat Analyzer 输出（真实聊天记录 / AI 分析报告，隐私）===
-output/
-
-# === 隐私文档（真实微信群名 + 群 ID 清单）===
-docs/wechat_groups_report.md
-docs/wechat_real_groups_report.md
-
-# === 第三方二进制工具（微信密钥提取工具等，不上传）===
-tools/
-
-# === Python 虚拟环境 ===
+# Python environments and generated artifacts
 venv/
-
-# === 缓存 / 构建产物 ===
+**/.venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
-*.egg-info/
+.test-tmp/
 build/
 dist/
 
-# === 系统 / 编辑器文件 ===
+# Flutter / Dart generated artifacts
+.dart_tool/
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+*.iml
+
+# System and editor files
 .DS_Store
 Thumbs.db
 .idea/

@@ -1,0 +1,28 @@
+# 模型单价表（非机密，入库）。价格有变只改这里，不改代码。
+# 单位：元 / 1M token（LLM）；元 / 万字符（TTS）；元 / 次 或 元 / 千张（其他）
+# 数据来源（2026-08）：https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
+#                     https://help.aliyun.com/zh/model-studio/minimax-synchronous-speech-synthesis-api
+
+deepseek:
+  deepseek-v4-flash:
+    input_per_m: 1.0
+    input_cache_hit_per_m: 0.02
+    output_per_m: 2.0
+  deepseek-v4-flash-vision-exp:
+    input_per_m: 1.0
+    input_cache_hit_per_m: 0.02
+    output_per_m: 2.0
+  peak_hours:            # 北京时间工作日高峰，费用 ×2
+    - [9, 12]
+    - [14, 18]
+  peak_multiplier: 2.0
+
+minimax:
+  speech-02-turbo:
+    per_10k_chars: 2.0
+  speech-02-hd:
+    per_10k_chars: 2.0
+
+# 兜底/本地一律记 0 元，报表里能看到"省了多少钱"
+edge: { per_10k_chars: 0.0 }
+local: { per_10k_chars: 0.0 }

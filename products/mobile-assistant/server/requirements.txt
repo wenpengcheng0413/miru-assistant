@@ -1,0 +1,27 @@
+# Miru Server 核心依赖
+fastapi>=0.110
+uvicorn[standard]>=0.29
+websockets>=12
+sqlalchemy>=2.0
+openai>=1.40
+httpx>=0.27
+loguru>=0.7
+pydantic>=2
+pyyaml>=6
+python-multipart>=0.0.9
+zeroconf>=0.150,<0.151
+
+# 文档 / 表格解析（启用手机文件分析时安装）
+PyMuPDF>=1.24
+openpyxl>=3.1
+python-docx>=1.1
+python-pptx>=1.0
+
+# --- 可选（按需取消注释）---
+# 本地 STT（SenseVoice，推荐）
+# sherpa-onnx>=1.10
+# numpy
+# TTS 免费兜底
+# edge-tts>=6.1
+# PC 麦克风全链路调试脚本 scripts/voice_chat.py
+# sounddevice>=0.4

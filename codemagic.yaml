@@ -6,7 +6,7 @@ workflows:
     name: Miru iOS Sideload IPA Build
     instance_type: mac_mini_m1
     max_build_duration: 60
-    working_directory: app
+    working_directory: products/mobile-assistant/app
     environment:
       # 固定 3.41.7：机器上存在多套 SDK（3.47 的 podhelper 布局已变），
       # 必须保证 pub get 与 xcodebuild 用同一套，否则 Dart 语言版本冲突（language 3.12 too high）
@@ -24,7 +24,7 @@ workflows:
         - pattern: ios-v*
           include: true
     scripts:
-      # app/ 只有 pubspec + lib（无 ios/ 平台壳）：在 /tmp 生成后只拷 ios/ 进来，
+      # 客户端目录只有 pubspec + lib（无 ios/ 平台壳）：在 /tmp 生成后只拷 ios/ 进来，
       # 避免 flutter create . 覆盖我们的 README 等文件
       - name: Generate iOS platform shell
         script: |
@@ -38,7 +38,11 @@ workflows:
         script: |
           PLIST=ios/Runner/Info.plist
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Miru 需要麦克风来听你说话'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Miru 需要相机来拍摄并分析图片'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Miru 需要访问照片以分析你选择的图片'" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Miru 需要连接你电脑上的后端服务'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices:0 string '_miru._tcp'" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST"

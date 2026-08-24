@@ -1,0 +1,247 @@
+"""DeepSeek 流式客户端（OpenAI 兼容协议）——含流式 tool_calls 分片拼接。
+
+要点（2026-08 调研确认）：
+- model=deepseek-v4-flash（自动指向 0731）；1M 上下文
+- 语音场景必须关闭思考模式（thinking 默认开启，推理 token 按输出计费）
+- 流式工具调用：delta.tool_calls 按 index 归并，function.arguments 逐片拼接
+- stream_options.include_usage → 末帧带真实 token 用量（成本入账用）
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from dataclasses import dataclass, field
+from typing import AsyncIterator
+
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    AuthenticationError,
+    BadRequestError,
+    InternalServerError,
+    RateLimitError,
+)
+
+from ..config import LLMConfig
+
+logger = logging.getLogger(__name__)
+
+RETRYABLE = (APITimeoutError, APIConnectionError, RateLimitError, InternalServerError)
+RETRY_DELAYS = (2.0, 8.0)
+
+
+@dataclass
+class Usage:
+    prompt_tokens: int
+    completion_tokens: int
+    cache_hit_tokens: int = 0
+    cache_miss_tokens: int = 0
+    estimated: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "cache_hit_tokens": self.cache_hit_tokens,
+            "cache_miss_tokens": self.cache_miss_tokens,
+            "estimated": self.estimated,
+        }
+
+
+@dataclass
+class ToolCallSpec:
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass
+class TextDelta:
+    text: str
+
+
+@dataclass
+class ToolCallsDone:
+    calls: list[ToolCallSpec]
+
+
+@dataclass
+class Done:
+    usage: Usage
+
+
+@dataclass
+class StreamError:
+    message: str
+
+
+LLMEvent = TextDelta | ToolCallsDone | Done | StreamError
+
+
+class LLMClient:
+    def __init__(self, cfg: LLMConfig):
+        self.cfg = cfg
+        self._client = AsyncOpenAI(
+            api_key=cfg.api_key or "missing-key",  # 占位，空 key 时首次调用报错并提示
+            base_url=cfg.base_url,
+            timeout=cfg.timeout_s,
+            max_retries=0,  # 重试策略自己控制（流式中途重试 SDK 行为不可控）
+        )
+
+    @property
+    def model(self) -> str:
+        return self.cfg.model
+
+    async def stream_chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        model: str | None = None,
+    ) -> AsyncIterator[LLMEvent]:
+        """流式对话。可能的事件：TextDelta* → (ToolCallsDone) → Done；失败时 StreamError。"""
+        kwargs = {
+            "model": model or self.cfg.model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "temperature": self.cfg.temperature,
+            "max_tokens": self.cfg.max_tokens,
+        }
+        if tools:
+            kwargs["tools"] = tools
+        use_thinking_override = not self.cfg.thinking
+        if use_thinking_override:
+            kwargs["extra_body"] = {"thinking": {"enabled": False}}
+
+        last_error = "未知错误"
+        for attempt in range(3):
+            try:
+                async for ev in self._stream_once(kwargs):
+                    yield ev
+                return
+            except BadRequestError as e:
+                # 老网关不认 thinking 参数 → 去掉重试一次
+                if use_thinking_override and "thinking" in str(e).lower():
+                    logger.warning("API 不接受 thinking 参数，去掉后重试")
+                    kwargs.pop("extra_body", None)
+                    use_thinking_override = False
+                    continue
+                last_error = f"请求被拒: {e}"
+                break  # 400 不重试
+            except AuthenticationError as e:
+                last_error = f"API key 无效: {e}"
+                break
+            except RETRYABLE as e:
+                last_error = f"{type(e).__name__}: {e}"
+                if attempt < 2:
+                    await asyncio.sleep(RETRY_DELAYS[attempt])
+                    continue
+            except Exception as e:  # 网络/解析等杂项
+                last_error = f"{type(e).__name__}: {e}"
+                if attempt < 2:
+                    await asyncio.sleep(RETRY_DELAYS[attempt])
+                    continue
+        yield StreamError(f"LLM 不可用（{last_error}）")
+
+    async def _stream_once(self, kwargs: dict) -> AsyncIterator[LLMEvent]:
+        stream = await self._client.chat.completions.create(**kwargs)
+
+        # 流式工具调用：按 index 归并分片
+        acc: dict[int, dict] = {}
+        usage: Usage | None = None
+
+        async for chunk in stream:
+            if chunk.usage is not None:
+                u = chunk.usage
+                usage = Usage(
+                    prompt_tokens=getattr(u, "prompt_tokens", 0) or 0,
+                    completion_tokens=getattr(u, "completion_tokens", 0) or 0,
+                    cache_hit_tokens=getattr(u, "prompt_cache_hit_tokens", 0) or 0,
+                    cache_miss_tokens=getattr(u, "prompt_cache_miss_tokens", 0) or 0,
+                )
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = choice.delta
+            if delta.content:
+                yield TextDelta(delta.content)
+            for tc in delta.tool_calls or []:
+                slot = acc.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                if tc.id:
+                    slot["id"] = tc.id
+                if tc.function:
+                    if tc.function.name:
+                        slot["name"] = tc.function.name
+                    if tc.function.arguments:
+                        slot["arguments"] += tc.function.arguments
+            if choice.finish_reason == "tool_calls":
+                yield ToolCallsDone(calls=[_parse_call(s) for s in acc.values()])
+                acc = {}
+
+        # 用量兜底：估算（约 1 token ≈ 3.5 中文汉字 → 用 /3 保守）
+        if usage is None:
+            prompt_chars = sum(len(str(m.get("content", ""))) for m in kwargs["messages"])
+            usage = Usage(
+                prompt_tokens=prompt_chars // 3,
+                completion_tokens=0,
+                estimated=True,
+            )
+        yield Done(usage)
+
+
+    async def chat_json(self, system: str, user: str, temperature: float = 0.1) -> dict:
+        """一次性 JSON 模式调用（记忆提取等结构化任务用）。"""
+        kwargs = {
+            "model": self.cfg.model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "response_format": {"type": "json_object"},
+            "temperature": temperature,
+            "max_tokens": min(self.cfg.max_tokens, 1000),
+        }
+        if not self.cfg.thinking:
+            kwargs["extra_body"] = {"thinking": {"enabled": False}}
+        try:
+            resp = await self._client.chat.completions.create(**kwargs)
+        except BadRequestError as e:
+            if "thinking" in str(e).lower() and kwargs.get("extra_body"):
+                kwargs.pop("extra_body")
+                resp = await self._client.chat.completions.create(**kwargs)
+            else:
+                raise
+        text = resp.choices[0].message.content or "{}"
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("chat_json 解析失败: %s", text[:200])
+            return {}
+
+
+def _parse_call(slot: dict) -> ToolCallSpec:
+    try:
+        args = json.loads(slot["arguments"] or "{}")
+    except json.JSONDecodeError:
+        args = {"_raw": slot["arguments"]}
+    return ToolCallSpec(id=slot["id"] or "", name=slot["name"] or "", arguments=args)
+
+
+def tool_result_message(call: ToolCallSpec, result_json: str) -> dict:
+    """OpenAI 协议：工具执行结果回填消息。"""
+    return {"role": "tool", "tool_call_id": call.id, "content": result_json}
+
+
+def assistant_toolcall_message(calls: list[ToolCallSpec]) -> dict:
+    return {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": c.id,
+                "type": "function",
+                "function": {"name": c.name, "arguments": json.dumps(c.arguments, ensure_ascii=False)},
+            }
+            for c in calls
+        ],
+    }

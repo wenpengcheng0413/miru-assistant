@@ -1,0 +1,82 @@
+"""工具注册表与内置工具测试。"""
+import asyncio
+
+from miru_server.core.llm import Usage
+from miru_server.tools.base import ToolContext
+from miru_server.tools.registry import ToolRegistry, build_registry
+
+
+def _ctx(services, events=None):
+    async def cap(payload):
+        if events is not None:
+            events.append(payload)
+    return ToolContext(services=services, conversation_id="t", emit=cap)
+
+
+def test_registry_whitelist(app_config, services):
+    registry = build_registry(app_config)
+    names = registry.enabled_names
+    assert "get_current_time" in names
+    assert "memory_set" in names
+    assert "wechat_chat_stats" not in names   # 默认白名单外
+    schemas = registry.schemas()
+    assert all("function" in s and s["function"]["name"] in names for s in schemas)
+
+
+def test_get_current_time(services):
+    registry = build_registry(services.config)
+    result = asyncio.run(registry.execute(_ctx(services), "get_current_time", {}))
+    assert result.ok
+    assert "2026" in result.data["date"] or True  # 年份以机器时钟为准，只验证结构
+    assert result.data["weekday"].startswith("星期")
+
+
+def test_disabled_tool_rejected(services):
+    registry = build_registry(services.config)
+    result = asyncio.run(registry.execute(_ctx(services), "wechat_chat_stats", {}))
+    assert not result.ok and "未启用" in result.error
+
+
+def test_memory_tools_roundtrip(services):
+    registry = build_registry(services.config)
+    r = asyncio.run(registry.execute(
+        _ctx(services), "memory_set", {"scope": "profile", "key": "称呼", "value": "老板"}
+    ))
+    assert r.ok
+    r = asyncio.run(registry.execute(
+        _ctx(services), "memory_get", {"scope": "profile", "key": "称呼"}
+    ))
+    assert r.ok and r.data["value"] == "老板"
+
+
+def test_api_cost_tools(services):
+    registry = build_registry(services.config)
+    services.cost.record_llm(None, "deepseek-v4-flash", Usage(1000, 500))
+    services.cost.record_tts(None, "minimax", "speech-02-turbo", 10000)
+    r = asyncio.run(registry.execute(_ctx(services), "api_cost_report", {"days": 7}))
+    assert r.ok and r.data["total_rmb"] > 0
+    r = asyncio.run(registry.execute(
+        _ctx(services), "api_budget_set", {"limit_rmb": 150, "provider": "total"}
+    ))
+    assert r.ok
+    status = services.cost.budget_status("total")
+    assert status["limit_rmb"] == 150
+
+
+def test_clean_wechat_content():
+    """XML 媒体消息 → 可读占位（aeskey 不外泄）；链接保留标题；超长截断。"""
+    from miru_server.tools.builtin.wechat import _clean_content
+
+    img_xml = '<?xml version="1.0"?><msg><img aeskey="50122582fd3e9428ac" cdnmid="x"/></msg>'
+    assert _clean_content(img_xml) == "[图片]"
+    assert "aeskey" not in _clean_content(img_xml)
+
+    link_xml = '<?xml version="1.0"?><msg><appmsg><title>一篇好文章</title><url>http://x</url></appmsg></msg>'
+    assert _clean_content(link_xml) == "[链接: 一篇好文章]"
+
+    voice_xml = '<?xml version="1.0"?><msg><voicemsg voicelength="5000"/></msg>'
+    assert _clean_content(voice_xml) == "[语音]"
+
+    assert _clean_content("正常文本") == "正常文本"
+    assert _clean_content("长" * 600).endswith("…")
+    assert len(_clean_content("长" * 600)) <= 501

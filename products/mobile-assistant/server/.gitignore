@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# 运行时数据（数据库、模型、日志）
+data/
+logs/
+
+# 真实配置（只提交 *.example 模板——与仓库 V1/V2 惯例一致）
+.env
+config/settings.yaml
+config/persona/*.yaml
+!config/persona/*.example.yaml

@@ -15,7 +15,9 @@ dependencies:
   dio: ^5.4.3
   shared_preferences: ^2.3.0
   flutter_secure_storage: ^9.0.0
-  bonsoir: ^7.1.5
+  # 7.1.5 起其 Android 平台包要求 Dart 3.12；Codemagic 的 Flutter
+  # 3.41.7 使用 Dart 3.11，因此必须固定到最后一个兼容版本。
+  bonsoir: 7.1.4
   file_picker: ^8.1.7
   image_picker: ^1.1.2
   cupertino_icons: ^1.0.6

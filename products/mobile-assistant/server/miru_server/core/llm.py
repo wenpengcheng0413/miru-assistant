@@ -114,9 +114,12 @@ class LLMClient:
         }
         if tools:
             kwargs["tools"] = tools
-        use_thinking_override = not self.cfg.thinking
-        if use_thinking_override:
-            kwargs["extra_body"] = {"thinking": {"enabled": False}}
+        # DeepSeek V4 uses type=enabled/disabled. The older enabled=false
+        # form triggers a 400 and deleting it re-enables hidden reasoning.
+        thinking_override = True
+        kwargs["extra_body"] = {
+            "thinking": {"type": "enabled" if self.cfg.thinking else "disabled"}
+        }
 
         last_error = "未知错误"
         for attempt in range(3):
@@ -151,10 +154,10 @@ class LLMClient:
                 return
             except BadRequestError as e:
                 # 老网关不认 thinking 参数 → 去掉重试一次
-                if use_thinking_override and "thinking" in str(e).lower():
+                if thinking_override and "thinking" in str(e).lower():
                     logger.warning("API 不接受 thinking 参数，去掉后重试")
                     kwargs.pop("extra_body", None)
-                    use_thinking_override = False
+                    thinking_override = False
                     continue
                 last_error = f"请求被拒: {e}"
                 break  # 400 不重试
@@ -231,8 +234,9 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": min(self.cfg.max_tokens, 1000),
         }
-        if not self.cfg.thinking:
-            kwargs["extra_body"] = {"thinking": {"enabled": False}}
+        kwargs["extra_body"] = {
+            "thinking": {"type": "enabled" if self.cfg.thinking else "disabled"}
+        }
         try:
             resp = await self._client.chat.completions.create(**kwargs)
         except BadRequestError as e:

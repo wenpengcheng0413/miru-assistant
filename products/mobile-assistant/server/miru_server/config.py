@@ -39,7 +39,9 @@ class LLMConfig(BaseModel):
     vision_model: str = "deepseek-v4-flash-vision-exp"
     thinking: bool = False
     temperature: float = 0.7
-    max_tokens: int = 8192
+    # DeepSeek V4 Flash supports up to 384K output; 32K is a practical default
+    # for attachment reports without making ordinary requests unnecessarily slow.
+    max_tokens: int = 32768
     short_max_tokens: int = 2048
     timeout_s: float = 90.0
     max_tool_rounds: int = 6

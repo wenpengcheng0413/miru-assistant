@@ -171,7 +171,8 @@ class AgentPipeline:
         schemas = self.services.tools.schemas() or None
         long_context = bool(attachments) or len(str(user_content)) >= 12_000
         # 附件/长上下文固定给到计划中的上限；短文本保持轻量预算。
-        response_max_tokens = 8192 if long_context else cfg.llm.short_max_tokens
+        long_max_tokens = min(cfg.llm.max_tokens, 384_000)
+        response_max_tokens = long_max_tokens if long_context else cfg.llm.short_max_tokens
         analysis_detail = (
             f"上下文约 {len(str(user_content)):,} 字符，回复上限 {response_max_tokens} tokens"
         )
@@ -269,14 +270,14 @@ class AgentPipeline:
                         tts.enqueue(sentence)
 
                 if length_limited and not calls:
-                    if not length_retry_done and response_max_tokens < 8192:
+                    if not length_retry_done and response_max_tokens < long_max_tokens:
                         # 把已生成正文作为上下文，请模型从截断处继续，避免重复整段回答。
                         length_retry_done = True
-                        response_max_tokens = 8192
+                        response_max_tokens = long_max_tokens
                         await step(
                             "generation",
                             "回复较长，正在继续生成",
-                            "已达到当前输出上限，自动提高到 8192 tokens",
+                            f"已达到当前输出上限，自动提高到 {response_max_tokens} tokens",
                         )
                         messages.extend([
                             {"role": "assistant", "content": "".join(assistant_parts)},

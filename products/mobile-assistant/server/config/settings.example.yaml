@@ -15,7 +15,7 @@ llm:
   vision_model: deepseek-v4-flash-vision-exp  # 图片/截图专用；文字仍使用上面的稳定模型
   thinking: false         # 语音场景必须关闭思考模式
   temperature: 0.7
-  max_tokens: 2048
+  max_tokens: 32768
   timeout_s: 90
   max_tool_rounds: 6      # 单轮对话工具循环上限（防死循环烧钱）
 

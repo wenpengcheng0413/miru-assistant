@@ -13,6 +13,8 @@ def test_health_requires_token(app_config):
         data = resp.json()
         assert data["stt_engine"] == "none"
         assert data["tts_provider"] == "none"
+        assert data["build_id"]
+        assert "error_code" in data["wechat"]
 
 
 def test_memory_endpoints(app_config):

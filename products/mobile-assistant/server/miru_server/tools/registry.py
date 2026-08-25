@@ -61,7 +61,9 @@ class ToolRegistry:
             logger.exception("工具 %s 执行异常", name)
             result = ToolResult.failure(f"工具 {name} 执行异常: {e}")
         duration_ms = int((time.monotonic() - started) * 1000)
-        await ctx.emit(tool_end_event(call_id, name, result.ok, result.summary, duration_ms))
+        await ctx.emit(tool_end_event(
+            call_id, name, result.ok, result.summary, duration_ms, result.error
+        ))
         return result
 
 
@@ -81,6 +83,7 @@ def build_registry(config: Any) -> ToolRegistry:
         WechatContactListTool,
         WechatGroupDigestTool,
         WechatGroupListTool,
+        WechatRecentActivityTool,
         WechatRecentMessagesTool,
         WechatRecentContactsTool,
         WechatConversationDigestTool,
@@ -95,6 +98,7 @@ def build_registry(config: Any) -> ToolRegistry:
     if any(name.startswith("wechat_") for name in enabled):
         enabled.extend([
             "wechat_recent_contacts", "wechat_conversation_digest", "wechat_dataset_page",
+            "wechat_recent_activity",
         ])
     return ToolRegistry(
         tools=[
@@ -107,6 +111,7 @@ def build_registry(config: Any) -> ToolRegistry:
             ApiCostReportTool,
             ApiBudgetSetTool,
             WechatContactListTool,
+            WechatRecentActivityTool,
             WechatChatStatsTool,
             WechatSearchMessagesTool,
             WechatRecentMessagesTool,

@@ -333,7 +333,11 @@ class AgentPipeline:
                     await step(
                         "tool",
                         f"工具已完成：{call.name}",
-                        getattr(result, "summary", "工具执行完成") or "工具执行完成",
+                        (
+                            getattr(result, "summary", "工具执行完成") or "工具执行完成"
+                        )
+                        if result.ok
+                        else (getattr(result, "error", "") or "工具执行失败"),
                         "done" if result.ok else "error",
                     )
                     tool_cls = self.services.tools.get(call.name)

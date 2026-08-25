@@ -459,6 +459,19 @@ class OfflineWeChatDB:
 
     # ---- 消息读取 ----
 
+    def list_message_tables(self, shard_rel: str) -> set[str]:
+        """返回消息分片中的会话表名，不读取历史消息内容。"""
+        try:
+            conn = self.open(shard_rel)
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name LIKE 'Msg_%'"
+            ).fetchall()
+            return {str(row[0]) for row in rows if row and row[0]}
+        except (FileNotFoundError, sqlite3.Error) as exc:
+            logger.debug("消息分片 %s 的会话表不可读: %s", shard_rel, exc)
+            return set()
+
     def read_all_messages(self, table: str, shard_rel: str) -> list[ChatMessage]:
         """
         读取会话表的全部消息（时间升序），sender 名称按分片解析。
@@ -470,6 +483,25 @@ class OfflineWeChatDB:
         Returns:
             ChatMessage 列表（按 create_time ASC, sort_seq ASC 排序）。
         """
+        return self._read_messages_query(table, shard_rel)
+
+    def read_messages_since(
+        self,
+        table: str,
+        shard_rel: str,
+        since: int,
+        until: int | None = None,
+    ) -> list[ChatMessage]:
+        """只读取时间窗口内的消息，避免为近期统计加载整张会话表。"""
+        return self._read_messages_query(table, shard_rel, since=since, until=until)
+
+    def _read_messages_query(
+        self,
+        table: str,
+        shard_rel: str,
+        since: int | None = None,
+        until: int | None = None,
+    ) -> list[ChatMessage]:
         conn = self.open(shard_rel)
 
         # 分片 Name2Id: rowid → username
@@ -484,8 +516,18 @@ class OfflineWeChatDB:
 
         cols_row = conn.execute(f"PRAGMA table_info([{table}])").fetchall()
         cols = [c[1] for c in cols_row]
+        where: list[str] = []
+        params: list[int] = []
+        if since is not None and "create_time" in cols:
+            where.append("create_time >= ?")
+            params.append(int(since))
+        if until is not None and "create_time" in cols:
+            where.append("create_time <= ?")
+            params.append(int(until))
+        predicate = f" WHERE {' AND '.join(where)}" if where else ""
+        order = "create_time ASC, sort_seq ASC" if "sort_seq" in cols else "create_time ASC"
         rows = conn.execute(
-            f"SELECT * FROM [{table}] ORDER BY create_time ASC, sort_seq ASC"
+            f"SELECT * FROM [{table}]{predicate} ORDER BY {order}", params
         ).fetchall()
 
         msgs: list[ChatMessage] = []

@@ -8,7 +8,9 @@ from __future__ import annotations
 import argparse
 import contextlib
 import logging
+import os
 import secrets
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -21,7 +23,7 @@ from .db.backup import backup_database
 from .discovery import LanServiceAdvertiser
 from .logging_setup import setup_logging
 from .services import create_services
-from .wechat_runtime import ensure_miru_import_path
+from .wechat_runtime import ensure_miru_import_path, runtime_build_id
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,11 @@ def create_app(config: AppConfig) -> FastAPI:
                 config.server.token,
             )
         app.state.services = services
+        app.state.started_at = datetime.now(timezone.utc).isoformat()
+        logger.info(
+            "Miru runtime ready: build=%s python=%s miru_path=%s",
+            runtime_build_id(), os.sys.executable, ensure_miru_import_path(),
+        )
 
         # Bonjour/mDNS：手机可按服务名发现电脑，不再依赖固定 DHCP 地址。
         # 开机早期网卡可能尚未就绪，所以后台定期刷新；失败不阻塞主服务。

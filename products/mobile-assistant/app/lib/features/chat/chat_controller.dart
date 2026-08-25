@@ -629,6 +629,10 @@ class ChatController extends ChangeNotifier {
         notifyListeners();
       case 'tool_end':
         toolStatus = '';
+        final toolError = e['error'] as String? ?? '';
+        if (toolError.isNotEmpty) {
+          progressStatus = '工具失败：$toolError';
+        }
         notifyListeners();
       case 'turn_end':
         player.finishSentence(); // 兜底：flush 最后一句

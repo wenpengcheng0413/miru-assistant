@@ -81,12 +81,22 @@ def tool_start(call_id: str, name: str, args: dict) -> dict:
     return event({"type": "tool_start", "id": call_id, "name": name, "args": args})
 
 
-def tool_end(call_id: str, name: str, ok: bool, summary: str, duration_ms: int) -> dict:
-    return event({
+def tool_end(
+    call_id: str,
+    name: str,
+    ok: bool,
+    summary: str,
+    duration_ms: int,
+    error: str = "",
+) -> dict:
+    payload = {
         "type": "tool_end",
         "id": call_id, "name": name,
         "ok": ok, "summary": summary, "duration_ms": duration_ms,
-    })
+    }
+    if error:
+        payload["error"] = error
+    return event(payload)
 
 
 def turn_end(

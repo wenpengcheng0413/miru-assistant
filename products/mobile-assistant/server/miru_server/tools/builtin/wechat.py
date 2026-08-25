@@ -11,15 +11,22 @@ import asyncio
 import logging
 import re
 import sqlite3
-from datetime import datetime
+import time
+from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ..base import Tool, ToolContext, ToolResult
-import time
 from ...wechat_runtime import data_root_for, ensure_miru_import_path, runtime_diagnostics
 
 logger = logging.getLogger(__name__)
+_WECHAT_TZ = ZoneInfo("Asia/Shanghai")
+_SYSTEM_USERNAMES = {
+    "filehelper", "notifymessage", "fmessage", "floatbottle", "medianote",
+    "newsapp", "weixin", "wxid_transfer", "brandsessionholder",
+}
 
 ensure_miru_import_path()
 try:
@@ -72,8 +79,9 @@ def _db(ctx: ToolContext) -> "OfflineWeChatDB":
         except Exception as exc:
             diag = runtime_diagnostics(ctx.services.config)
             raise RuntimeError(
-                f"微信工具不可用：{exc}。请确认服务使用 daily-report/src，"
-                f"数据目录={diag.get('data_dir') or '未找到'}"
+                f"WECHAT_DEPENDENCY_ERROR: 微信工具不可用：{exc}；"
+                f"miru_path={diag.get('package_path') or '未找到'}；"
+                f"data_dir={diag.get('data_dir') or '未找到'}"
             ) from exc
     data_root = data_root_for(ctx.services.config)
     # 同步构造放到线程里（内部有文件 IO）
@@ -91,9 +99,18 @@ async def _step(ctx: ToolContext, phase: str, title: str, detail: str = "", stat
     })
 
 
-def _search_contacts(db, query: str = "", limit: int = 20) -> list[dict]:
+def _is_system_contact(contact: dict) -> bool:
+    username = str(contact.get("username") or "").lower()
+    return username in _SYSTEM_USERNAMES or username.endswith("@openim")
+
+
+def _search_contacts(
+    db, query: str = "", limit: int = 20, include_system: bool = False
+) -> list[dict]:
     """按昵称/备注/显示名模糊搜索（大小写不敏感）；query 为空返回前 N 条。"""
     contacts = db.get_contacts()
+    if not include_system:
+        contacts = [c for c in contacts if not _is_system_contact(c)]
     if not query:
         return contacts[:limit]
     q = query.lower()
@@ -105,6 +122,20 @@ def _search_contacts(db, query: str = "", limit: int = 20) -> list[dict]:
     # 昵称完全一致的排最前（如 "krista" 命中 "Krista"）
     hits.sort(key=lambda c: (c.get("nickname") or "").lower() != q)
     return hits[:limit]
+
+
+def _resolve_contact(db, name: str) -> dict[str, str]:
+    """解析联系人；失败时给模型返回安全的候选名称，便于自动纠错。"""
+    try:
+        return db.resolve_contact(name)
+    except Exception as exc:
+        candidates = _search_contacts(db, name, 5)
+        names = [
+            str(c.get("display_name") or c.get("nickname") or c.get("remark") or "")
+            for c in candidates
+        ]
+        hint = f"；候选联系人: {', '.join(n for n in names if n)}" if names else ""
+        raise RuntimeError(f"未找到联系人‘{name}’{hint}") from exc
 
 
 def _self_wxid(db) -> str:
@@ -211,14 +242,18 @@ class WechatContactListTool(Tool):
         "properties": {
             "query": {"type": "string", "description": "搜索词（昵称/备注/显示名片段，大小写不敏感）"},
             "limit": {"type": "integer", "description": "最多返回条数", "default": 20},
+            "include_system": {"type": "boolean", "description": "是否包含系统账号，默认 false", "default": False},
         },
     }
 
-    async def run(self, ctx: ToolContext, query: str = "", limit: int = 20) -> ToolResult:
+    async def run(
+        self, ctx: ToolContext, query: str = "", limit: int = 20, include_system: bool = False
+    ) -> ToolResult:
+        limit = max(1, min(int(limit), 100))
         def _do():
             db = _db(ctx)
             try:
-                return _search_contacts(db, query, limit)
+                return _search_contacts(db, query, limit, include_system)
             finally:
                 db.close()
         try:
@@ -236,6 +271,139 @@ class WechatContactListTool(Tool):
         ]
         summary = f"命中 {len(data)} 个联系人" if query else f"已读取前 {len(data)} 个联系人"
         return ToolResult.success(data, summary=summary)
+
+
+class WechatRecentActivityTool(Tool):
+    name = "wechat_recent_activity"
+    timeout_s = 120.0
+    description = (
+        "统计最近一段时间内和我实际发生过消息的微信联系人或群聊。"
+        "用户问‘最近一小时和谁说过话/谁联系过我’时直接使用；无需先调用联系人列表。"
+        "只返回聚合统计，不返回聊天原文。默认 minutes=60，可覆盖最近 1 到 1440 分钟。"
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "minutes": {"type": "integer", "description": "最近多少分钟，默认 60", "default": 60, "minimum": 1, "maximum": 1440},
+            "limit": {"type": "integer", "description": "最多返回多少个会话，默认 50", "default": 50, "minimum": 1, "maximum": 200},
+            "include_groups": {"type": "boolean", "description": "是否包含群聊，默认 true", "default": True},
+        },
+    }
+
+    async def run(
+        self,
+        ctx: ToolContext,
+        minutes: int = 60,
+        limit: int = 50,
+        include_groups: bool = True,
+    ) -> ToolResult:
+        minutes = max(1, min(int(minutes), 1440))
+        limit = max(1, min(int(limit), 200))
+        now = int(time.time())
+        since = now - minutes * 60
+        await _step(ctx, "wechat", "正在统计最近聊天", f"最近 {minutes} 分钟，跨全部联系人和群聊")
+
+        def _do() -> dict[str, Any]:
+            db = _db(ctx)
+            try:
+                contacts = db.get_contacts()
+                contact_by_username = {
+                    str(c.get("username") or ""): c
+                    for c in contacts
+                    if c.get("username") and not _is_system_contact(c)
+                }
+                if not include_groups:
+                    contact_by_username = {
+                        u: c for u, c in contact_by_username.items()
+                        if not u.endswith("@chatroom")
+                    }
+                try:
+                    from miru.chat_analyzer.offline_reader import MESSAGE_SHARDS, session_table_md5
+                except ImportError as exc:
+                    raise RuntimeError(f"WECHAT_READER_ERROR: 无法加载消息读取器: {exc}") from exc
+
+                self_wxid = _self_wxid(db)
+                # 先枚举每个分片的 Msg_* 表，再只查询实际存在的联系人会话。
+                table_to_username = {
+                    f"Msg_{session_table_md5(username)}": username
+                    for username in contact_by_username
+                }
+                rows_by_username: dict[str, list] = defaultdict(list)
+                warnings: list[str] = []
+                scanned_shards = 0
+                seen_messages: set[tuple] = set()
+                for rel in MESSAGE_SHARDS:
+                    path = Path(db.account_dir) / "db_storage" / rel
+                    if not path.exists():
+                        warnings.append(f"缺少消息分片: {rel}")
+                        continue
+                    scanned_shards += 1
+                    tables = db.list_message_tables(rel)
+                    for table in tables & table_to_username.keys():
+                        username = table_to_username[table]
+                        try:
+                            messages = db.read_messages_since(table, rel, since, now)
+                        except Exception as exc:
+                            warnings.append(f"分片 {rel} 的会话读取失败: {type(exc).__name__}")
+                            continue
+                        for message in messages:
+                            key = (
+                                username,
+                                int(message.server_id or 0),
+                            ) if message.server_id else (
+                                username, int(message.timestamp), message.sender_username,
+                                message.content,
+                            )
+                            if key in seen_messages:
+                                continue
+                            seen_messages.add(key)
+                            rows_by_username[username].append(message)
+
+                conversations = []
+                for username, messages in rows_by_username.items():
+                    if not messages:
+                        continue
+                    contact = contact_by_username.get(username, {})
+                    ordered = sorted(messages, key=lambda message: message.timestamp)
+                    from_me = sum(
+                        1 for message in ordered
+                        if message.sender == "我" or (self_wxid and message.sender_username == self_wxid)
+                    )
+                    conversations.append({
+                        "name": contact.get("display_name") or contact.get("nickname") or username,
+                        "nickname": contact.get("nickname") or "",
+                        "remark": contact.get("remark") or "",
+                        "is_group": username.endswith("@chatroom"),
+                        "message_count": len(ordered),
+                        "from_me": from_me,
+                        "from_others": len(ordered) - from_me,
+                        "first_at": datetime.fromtimestamp(ordered[0].timestamp, _WECHAT_TZ).isoformat(),
+                        "last_at": datetime.fromtimestamp(ordered[-1].timestamp, _WECHAT_TZ).isoformat(),
+                    })
+                conversations.sort(key=lambda item: (-item["message_count"], item["name"]))
+                return {
+                    "window_start": datetime.fromtimestamp(since, _WECHAT_TZ).isoformat(),
+                    "window_end": datetime.fromtimestamp(now, _WECHAT_TZ).isoformat(),
+                    "timezone": "Asia/Shanghai",
+                    "total_messages": sum(item["message_count"] for item in conversations),
+                    "conversation_count": len(conversations),
+                    "conversations": conversations[:limit],
+                    "source": "snapshot" if data_root_for(ctx.services.config) != (ctx.services.config.tools.wechat.data_root or "") else "database",
+                    "scanned_shards": scanned_shards,
+                    "partial": bool(warnings),
+                    "warnings": warnings,
+                }
+            finally:
+                db.close()
+
+        try:
+            data = await asyncio.to_thread(_do)
+        except Exception as exc:
+            return ToolResult.failure(f"微信最近聊天统计失败: {exc}")
+        return ToolResult.success(
+            data,
+            summary=f"最近 {minutes} 分钟涉及 {data['conversation_count']} 个会话，共 {data['total_messages']} 条消息",
+        )
 
 
 class WechatChatStatsTool(Tool):
@@ -256,10 +424,11 @@ class WechatChatStatsTool(Tool):
     }
 
     async def run(self, ctx: ToolContext, contact: str, limit: int = 5000) -> ToolResult:
+        limit = max(1, min(int(limit), 20_000))
         def _do():
             db = _db(ctx)
             try:
-                info = db.resolve_contact(contact)
+                info = _resolve_contact(db, contact)
                 messages = _resolve_session_messages(db, info["username"])
                 return messages[-limit:], _self_wxid(db)
             finally:
@@ -297,7 +466,7 @@ class WechatSearchMessagesTool(Tool):
         def _do():
             db = _db(ctx)
             try:
-                info = db.resolve_contact(contact)
+                info = _resolve_contact(db, contact)
                 messages = _resolve_session_messages(db, info["username"])
                 return messages, _self_wxid(db)
             finally:
@@ -345,7 +514,7 @@ class WechatRecentMessagesTool(Tool):
         def _do():
             db = _db(ctx)
             try:
-                info = db.resolve_contact(contact)
+                info = _resolve_contact(db, contact)
                 messages = _resolve_session_messages(db, info["username"])
                 cutoff = time.time() - days * 86400
                 recent = [m for m in messages if m.timestamp >= cutoff]
@@ -403,7 +572,7 @@ class WechatTranscribeVoiceTool(Tool):
 
             db = _db(ctx)
             try:
-                info = db.resolve_contact(contact)
+                info = _resolve_contact(db, contact)
                 cutoff = time.time() - days * 86400
                 voices = [
                     message for message in _resolve_session_messages(db, info["username"])
@@ -484,7 +653,7 @@ class WechatRecentContactsTool(Tool):
         def _do():
             db = _db(ctx)
             try:
-                contacts = db.get_contacts()
+                contacts = [c for c in db.get_contacts() if not _is_system_contact(c)]
                 return contacts[:limit], len(contacts)
             finally:
                 db.close()
@@ -519,7 +688,7 @@ class WechatConversationDigestTool(Tool):
         def _do():
             db = _db(ctx)
             try:
-                info = db.resolve_contact(contact)
+                info = _resolve_contact(db, contact)
                 messages = _resolve_session_messages(db, info["username"])
                 cutoff = time.time() - days * 86400
                 return [m for m in messages if m.timestamp >= cutoff][-limit:], _self_wxid(db)
@@ -554,7 +723,7 @@ class WechatDatasetPageTool(Tool):
         def _do():
             db = _db(ctx)
             try:
-                info = db.resolve_contact(contact); msgs = _resolve_session_messages(db, info["username"])
+                info = _resolve_contact(db, contact); msgs = _resolve_session_messages(db, info["username"])
                 cutoff = time.time() - max(1, days) * 86400
                 return _format_messages([m for m in msgs if m.timestamp >= cutoff], _self_wxid(db))
             finally:
@@ -648,7 +817,7 @@ class WechatGroupDigestTool(Tool):
         def _do_db() -> tuple[list, str]:
             db = _db(ctx)
             try:
-                info = db.resolve_contact(group)
+                info = _resolve_contact(db, group)
                 messages = _resolve_session_messages(db, info["username"])
                 cutoff = time.time() - days * 86400
                 recent = [m for m in messages if m.timestamp >= cutoff]

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -22,6 +23,24 @@ from sqlalchemy import select
 from .db.models import WechatContact, WechatSync, utcnow
 
 logger = logging.getLogger(__name__)
+
+
+def runtime_build_id() -> str:
+    """返回可在手机端显示的服务构建标识，不读取或暴露敏感配置。"""
+    configured = os.environ.get("MIRU_BUILD_ID", "").strip()
+    if configured:
+        return configured
+    try:
+        root = Path(__file__).resolve().parents[4]
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=root,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        ).strip() or "dev"
+    except Exception:
+        return "dev"
 
 
 def ensure_miru_import_path() -> Path | None:
@@ -96,6 +115,7 @@ def runtime_diagnostics(config) -> dict[str, Any]:
     source = _configured_root(config)
     package_path = ensure_miru_import_path()
     result: dict[str, Any] = {
+        "build_id": runtime_build_id(),
         "package_available": False,
         "package_path": str(package_path) if package_path else "",
         "data_dir": source,
@@ -107,6 +127,8 @@ def runtime_diagnostics(config) -> dict[str, Any]:
         "stt_available": False,
         "snapshot_available": snapshot_account(config) is not None,
         "snapshot": latest_manifest(config),
+        "source": "snapshot" if snapshot_account(config) is not None else "database",
+        "error_code": "",
         "error": "",
     }
     try:
@@ -124,10 +146,21 @@ def runtime_diagnostics(config) -> dict[str, Any]:
             try:
                 result["contacts_db_readable"] = bool(db.get_contacts() is not None)
             except Exception as exc:
+                result["error_code"] = "contacts_db_unreadable"
                 result["error"] = f"联系人数据库不可读: {exc}"
         finally:
             db.close()
+    except ImportError as exc:
+        result["error_code"] = "dependency_missing"
+        result["error"] = str(exc)
+    except FileNotFoundError as exc:
+        result["error_code"] = "data_missing"
+        result["error"] = str(exc)
+    except PermissionError as exc:
+        result["error_code"] = "permission_denied"
+        result["error"] = str(exc)
     except Exception as exc:
+        result["error_code"] = "reader_error"
         result["error"] = str(exc)
     try:
         engine = str(config.stt.engine).lower()

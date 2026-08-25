@@ -80,3 +80,15 @@ def test_clean_wechat_content():
     assert _clean_content("正常文本") == "正常文本"
     assert _clean_content("长" * 600).endswith("…")
     assert len(_clean_content("长" * 600)) <= 501
+
+
+def test_recent_activity_tool_is_enabled_when_wechat_is_configured(app_config):
+    app_config.tools.enabled.append("wechat_contact_list")
+    registry = build_registry(app_config)
+    assert "wechat_recent_activity" in registry.enabled_names
+    schema = next(
+        item for item in registry.schemas()
+        if item["function"]["name"] == "wechat_recent_activity"
+    )
+    props = schema["function"]["parameters"]["properties"]
+    assert set(("minutes", "limit", "include_groups")) <= set(props)

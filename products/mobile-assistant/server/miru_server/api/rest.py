@@ -45,6 +45,8 @@ async def health(request: Request):
     wechat = await asyncio.to_thread(runtime_diagnostics, s.config)
     return {
         "status": "ok",
+        "build_id": wechat.get("build_id", "dev"),
+        "started_at": getattr(request.app.state, "started_at", None),
         "llm_model": s.config.llm.model,
         "stt_engine": s.stt.name,
         "tts_provider": s.tts_provider.name if s.tts_provider else "none",

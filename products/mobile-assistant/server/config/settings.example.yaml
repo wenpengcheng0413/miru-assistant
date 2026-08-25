@@ -71,6 +71,7 @@ tools:
     - api_budget_set
     # 微信工具：需要本机安装现有 miru 包（与 V2 同一 venv），且配置好密钥
     # - wechat_contact_list
+    # - wechat_recent_activity
     # - wechat_chat_stats
     # - wechat_search_messages
     # - wechat_recent_messages

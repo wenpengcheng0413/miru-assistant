@@ -23,7 +23,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _tokenCtrl;
   bool _saving = false;
   bool _discovering = false;
+  bool _syncingWechat = false;
   String _testResult = '';
+  String _wechatStatus = '';
 
   Dio get _dio => Dio(BaseOptions(
         connectTimeout: const Duration(seconds: 12),
@@ -116,6 +118,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.only(top: 8),
               child: Text(_testResult, style: const TextStyle(fontSize: 13)),
             ),
+          if (_wechatStatus.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(_wechatStatus, style: const TextStyle(fontSize: 12)),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _syncingWechat ? null : _syncWechat,
+                icon: _syncingWechat
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync),
+                label: Text(_syncingWechat ? '正在同步微信数据…' : '同步微信数据'),
+              ),
+            ),
+          ],
           const Divider(height: 32),
           SwitchListTile(
             title: const Text('语音回复'),
@@ -188,7 +208,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       // REST 通了还要验证 WS 握手（聊天功能走 WS），防止只通一半
       await _probeWs(cleanUrl);
-      setState(() => _testResult = '✅ 连接成功（REST + WebSocket）：${resp.data}');
+      final health = Map<String, dynamic>.from(resp.data as Map);
+      setState(() {
+        _testResult = '✅ 连接成功（REST + WebSocket）';
+        _wechatStatus = _formatWechatStatus(health);
+      });
     } catch (e) {
       setState(() => _testResult = '❌ ${friendlyNetError(e)}');
     }
@@ -214,6 +238,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _testResult = '已找到 ${found.host}:${found.port}，正在验证连接…';
     });
     await _testConnection();
+  }
+
+  String _formatWechatStatus(Map<String, dynamic> health) {
+    final wx = Map<String, dynamic>.from((health['wechat'] as Map?) ?? {});
+    if (wx.isEmpty) return '微信状态：服务端未返回诊断信息';
+    final error = wx['error'] as String? ?? '';
+    if (error.isNotEmpty) {
+      return '微信状态：异常（${wx['error_code'] ?? 'reader_error'}）\n$error';
+    }
+    final source = wx['source'] == 'snapshot' ? '离线快照' : '实时数据库';
+    final stale = (wx['snapshot'] as Map?)?['stale'] == true ? '，快照已过期' : '';
+    return '微信状态：${wx['contacts_db_readable'] == true ? '联系人可读' : '联系人不可读'}'
+        ' · 消息分片 ${wx['message_shards'] ?? 0}/6'
+        ' · 密钥 ${wx['keys_file'] == true ? '已找到' : '缺失'}'
+        ' · 来源 $source$stale\n构建 ${health['build_id'] ?? wx['build_id'] ?? 'dev'}';
+  }
+
+  Future<void> _syncWechat() async {
+    final cleanUrl = _cleanUrl;
+    setState(() => _syncingWechat = true);
+    try {
+      await _dio.post(
+        '$cleanUrl/api/wechat/sync',
+        options: Options(headers: _headers),
+      );
+      final resp = await _dio.get(
+        '$cleanUrl/api/health',
+        options: Options(headers: _headers),
+      );
+      if (!mounted) return;
+      setState(() {
+        _wechatStatus = _formatWechatStatus(
+          Map<String, dynamic>.from(resp.data as Map),
+        );
+        _testResult = '✅ 微信离线快照同步完成';
+      });
+    } catch (e) {
+      if (mounted) setState(() => _testResult = '❌ 微信同步失败：${friendlyNetError(e)}');
+    } finally {
+      if (mounted) setState(() => _syncingWechat = false);
+    }
   }
 
   /// 探测 /ws/session：完成 hello 握手收到 hello_ok 才算真的能用。

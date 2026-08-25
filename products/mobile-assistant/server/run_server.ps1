@@ -63,9 +63,12 @@ while ($true) {
 
     try {
         Write-GuardianLog 'Starting Miru Server'
+        # WorkingDirectory is the server directory, so the default config/settings.yaml
+        # is resolved deterministically without quoting a path that contains spaces.
+        $arguments = "-m miru_server --host 0.0.0.0 --port $Port"
         $process = Start-Process `
             -FilePath $python `
-            -ArgumentList @('-m', 'miru_server', '--host', '0.0.0.0', '--port', $Port) `
+            -ArgumentList $arguments `
             -WorkingDirectory $server `
             -WindowStyle Hidden `
             -RedirectStandardOutput $stdoutLog `

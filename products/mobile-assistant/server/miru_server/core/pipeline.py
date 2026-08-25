@@ -180,6 +180,14 @@ class AgentPipeline:
 
             # 落库 + 成本入账 + 收尾
             assistant_text = "".join(assistant_parts).strip()
+            if not assistant_text:
+                logger.warning("LLM 本轮没有返回可见正文（conversation=%s）", ctx.conversation_id)
+                await self._send(
+                    ctx,
+                    "json",
+                    events.error("llm_empty", "模型返回了空内容，请稍后重试。"),
+                )
+                return
             await asyncio.to_thread(
                 self._save_message, ctx.conversation_id, "assistant", assistant_text
             )

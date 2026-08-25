@@ -119,8 +119,31 @@ class LLMClient:
         last_error = "未知错误"
         for attempt in range(3):
             try:
+                visible = False
+                tool_calls = False
+                usage: Usage | None = None
                 async for ev in self._stream_once(kwargs):
-                    yield ev
+                    if isinstance(ev, TextDelta):
+                        visible = visible or bool(ev.text.strip())
+                        yield ev
+                    elif isinstance(ev, ToolCallsDone):
+                        tool_calls = True
+                        yield ev
+                    elif isinstance(ev, Done):
+                        usage = ev.usage
+                # 某些网关在 thinking 参数被拒后仍只返回推理 token，
+                # 消耗满 max_tokens 却不给 content。扩大上限再试一次，
+                # 不能让客户端静默收到空回复。
+                if visible or tool_calls:
+                    if usage is not None:
+                        yield Done(usage)
+                    return
+                if attempt < 2:
+                    kwargs["max_tokens"] = min(max(int(kwargs["max_tokens"]) * 2, 4096), 8192)
+                    kwargs.pop("extra_body", None)
+                    logger.warning("LLM 返回空可见内容，扩大输出上限后重试（max_tokens=%s）", kwargs["max_tokens"])
+                    continue
+                yield StreamError("模型返回了空内容，请稍后重试（可能被思考 token 占满输出上限）")
                 return
             except BadRequestError as e:
                 # 老网关不认 thinking 参数 → 去掉重试一次

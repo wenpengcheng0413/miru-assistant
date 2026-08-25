@@ -26,7 +26,7 @@ from .llm import (
 )
 from .splitter import SentenceSplitter
 from ..attachments import image_content_block
-from ..db.models import Attachment, Conversation, Message, ToolCall, utcnow
+from ..db.models import Attachment, Conversation, Message, ToolCall, TurnTrace, utcnow
 from ..memory.extractor import MemoryExtractor
 from ..persona.builder import Persona
 from ..services import Services
@@ -51,6 +51,7 @@ class SessionContext:
     send_audio: Callable[[bytes], Awaitable[None]] | None = None
     stt_latency_ms: int = 0
     turn_running: bool = field(default=False, init=False)
+    turn_id: str | None = field(default=None, init=False)
     created_at: float = field(default_factory=time.time)
 
 
@@ -65,16 +66,72 @@ class AgentPipeline:
         cfg = self.services.config
         sink = ctx
         ctx.turn_running = True
+        turn_id = uuid.uuid4().hex
+        ctx.turn_id = turn_id
+        started_at = time.monotonic()
+        trace_steps: list[dict] = []
+        emitted_steps: set[int] = set()
+        trace_status = "running"
+        usage = None
+        cost_rmb = 0.0
         await self.ensure_conversation(ctx)
         heartbeat = asyncio.create_task(self._progress_heartbeat(ctx))
+
+        async def step(
+            phase: str,
+            title: str,
+            detail: str = "",
+            status: str = "running",
+            emit: bool = True,
+        ) -> None:
+            item = {
+                "seq": len(trace_steps) + 1,
+                "phase": phase,
+                "title": title,
+                "detail": detail,
+                "status": status,
+            }
+            trace_steps.append(item)
+            if emit:
+                emitted_steps.add(item["seq"])
+                await self._send(ctx, "json", events.process_step(
+                    turn_id, item["seq"], phase, title, detail, status
+                ))
+            await asyncio.to_thread(
+                self._save_trace,
+                ctx.conversation_id,
+                turn_id,
+                trace_status,
+                trace_steps,
+                int((time.monotonic() - started_at) * 1000),
+                usage,
+                cost_rmb,
+            )
+
+        async def flush_steps() -> None:
+            for item in trace_steps:
+                if item["seq"] in emitted_steps:
+                    continue
+                emitted_steps.add(item["seq"])
+                await self._send(ctx, "json", events.process_step(
+                    turn_id,
+                    item["seq"],
+                    item["phase"],
+                    item["title"],
+                    item["detail"],
+                    item["status"],
+                ))
 
         # 预算检查（hard_block 时直接拒绝）
         note = await self._budget_note()
         if note:
             await self._send(ctx, "json", note)
             if note["type"] == "error":
+                trace_status = "failed"
+                await step("error", "本轮未完成", note.get("message", "预算限制"), "error")
                 heartbeat.cancel()
                 ctx.turn_running = False
+                ctx.turn_id = None
                 return
 
         # 组装上下文（先读历史，再存本条用户消息，避免重复）
@@ -89,17 +146,35 @@ class AgentPipeline:
             )
         except (OSError, ValueError) as e:
             await self._send(ctx, "json", events.error("attachment_unavailable", str(e)))
+            trace_status = "failed"
+            await step("attachment", "附件读取失败", str(e), "error")
             heartbeat.cancel()
             ctx.turn_running = False
+            ctx.turn_id = None
             return
-        await self._send(ctx, "json", events.user_text(user_text))
-        await asyncio.to_thread(self._save_message, ctx.conversation_id, "user", stored_text)
+        await self._send(ctx, "json", events.user_text(user_text, turn_id))
+        await asyncio.to_thread(
+            self._save_message, ctx.conversation_id, "user", stored_text, turn_id
+        )
+        await step("prepare", "正在准备本轮任务", emit=False)
+        if attachments:
+            detail = "；".join(
+                f"{item.filename}（{item.kind}，{item.size_bytes:,} bytes，提取 {len(item.extracted_text):,} 字符）"
+                for item in attachments
+            )
+            await step("attachment", "已读取附件", detail, "done", emit=False)
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
             *history,
             {"role": "user", "content": user_content},
         ]
         schemas = self.services.tools.schemas() or None
+        long_context = bool(attachments) or len(str(user_content)) >= 12_000
+        # 附件/长上下文固定给到计划中的上限；短文本保持轻量预算。
+        response_max_tokens = 8192 if long_context else cfg.llm.short_max_tokens
+        analysis_detail = (
+            f"上下文约 {len(str(user_content)):,} 字符，回复上限 {response_max_tokens} tokens"
+        )
 
         # TTS 队列（仅需要合成且 provider 可用时）
         tts: TTSQueue | None = None
@@ -128,13 +203,35 @@ class AgentPipeline:
         last_feed = [time.monotonic()]   # 用列表共享引用给周期冲刷任务
         flusher = asyncio.create_task(self._periodic_flush(splitter, tts, last_feed))
         assistant_parts: list[str] = []
-        usage = None
 
         try:
+            analysis_step_sent = False
+            generation_step_sent = False
+            length_retry_done = False
             for _round_no in range(cfg.llm.max_tool_rounds):
                 calls = []
-                async for ev in self.services.llm.stream_chat(messages, schemas, model=model_name):
+                length_limited = False
+                try:
+                    stream = self.services.llm.stream_chat(
+                        messages,
+                        schemas,
+                        model=model_name,
+                        max_tokens=response_max_tokens,
+                    )
+                except TypeError as e:
+                    # 保持 FakeLLM/第三方适配器的旧接口兼容。
+                    if "max_tokens" not in str(e):
+                        raise
+                    stream = self.services.llm.stream_chat(messages, schemas, model=model_name)
+                async for ev in stream:
                     if isinstance(ev, TextDelta):
+                        await flush_steps()
+                        if not analysis_step_sent:
+                            await step("analysis", "正在分析附件和对话", analysis_detail)
+                            analysis_step_sent = True
+                        if not generation_step_sent:
+                            await step("generation", "正在生成回复")
+                            generation_step_sent = True
                         assistant_parts.append(ev.text)
                         await self._send(ctx, "json", events.llm_delta(ev.text))
                         if tts:
@@ -142,15 +239,73 @@ class AgentPipeline:
                                 tts.enqueue(sentence)
                         last_feed[0] = time.monotonic()
                     elif isinstance(ev, ToolCallsDone):
+                        await flush_steps()
+                        if not analysis_step_sent:
+                            await step("analysis", "正在分析附件和对话", analysis_detail)
+                            analysis_step_sent = True
+                        if not generation_step_sent:
+                            await step("generation", "正在生成回复")
+                            generation_step_sent = True
                         calls = ev.calls
                     elif isinstance(ev, Done):
                         usage = ev.usage
+                        length_limited = ev.finish_reason == "length"
                     elif isinstance(ev, StreamError):
+                        trace_status = "failed"
+                        await step("generation", "模型生成失败", ev.message, "error", emit=False)
+                        partial = "".join(assistant_parts).strip()
+                        if partial:
+                            await asyncio.to_thread(
+                                self._save_message,
+                                ctx.conversation_id,
+                                "assistant",
+                                partial,
+                                turn_id,
+                            )
                         await self._send(ctx, "json", events.error("llm_unavailable", ev.message))
                         return
                 if tts:
                     for sentence in splitter.flush(force=True):
                         tts.enqueue(sentence)
+
+                if length_limited and not calls:
+                    if not length_retry_done and response_max_tokens < 8192:
+                        # 把已生成正文作为上下文，请模型从截断处继续，避免重复整段回答。
+                        length_retry_done = True
+                        response_max_tokens = 8192
+                        await step(
+                            "generation",
+                            "回复较长，正在继续生成",
+                            "已达到当前输出上限，自动提高到 8192 tokens",
+                        )
+                        messages.extend([
+                            {"role": "assistant", "content": "".join(assistant_parts)},
+                            {"role": "user", "content": "请从刚才中断的位置继续完成回复，不要重复已经输出的内容。"},
+                        ])
+                        continue
+                    trace_status = "failed"
+                    await step(
+                        "generation",
+                        "回复达到长度上限",
+                        "已保留当前正文，请缩小问题范围后重试",
+                        "error",
+                        emit=False,
+                    )
+                    partial = "".join(assistant_parts).strip()
+                    if partial:
+                        await asyncio.to_thread(
+                            self._save_message,
+                            ctx.conversation_id,
+                            "assistant",
+                            partial,
+                            turn_id,
+                        )
+                    await self._send(
+                        ctx,
+                        "json",
+                        events.error("llm_truncated", "回复达到长度上限，已保留已生成内容，请缩小问题范围后重试。"),
+                    )
+                    return
 
                 if not calls:
                     break  # 正常结束
@@ -159,6 +314,7 @@ class AgentPipeline:
                 tool_msgs = []
                 for call in calls:
                     await self._send(ctx, "json", events.progress(f"正在执行工具：{call.name}…", "tool"))
+                    await step("tool", f"正在执行工具：{call.name}")
                     result = await self.services.tools.execute(
                         ToolContext(
                             services=self.services,
@@ -171,6 +327,12 @@ class AgentPipeline:
                     await asyncio.to_thread(
                         self._save_tool_call, ctx.conversation_id, call, result
                     )
+                    await step(
+                        "tool",
+                        f"工具已完成：{call.name}",
+                        getattr(result, "summary", "工具执行完成") or "工具执行完成",
+                        "done" if result.ok else "error",
+                    )
                     tool_msgs.append(tool_result_message(call, result.to_llm()))
                 messages.append(assistant_toolcall_message(calls))
                 messages.extend(tool_msgs)
@@ -182,6 +344,8 @@ class AgentPipeline:
             assistant_text = "".join(assistant_parts).strip()
             if not assistant_text:
                 logger.warning("LLM 本轮没有返回可见正文（conversation=%s）", ctx.conversation_id)
+                trace_status = "failed"
+                await step("generation", "模型没有返回可见正文", "请稍后重试", "error", emit=False)
                 await self._send(
                     ctx,
                     "json",
@@ -189,9 +353,8 @@ class AgentPipeline:
                 )
                 return
             await asyncio.to_thread(
-                self._save_message, ctx.conversation_id, "assistant", assistant_text
+                self._save_message, ctx.conversation_id, "assistant", assistant_text, turn_id
             )
-            cost_rmb = 0.0
             if usage is not None:
                 cost_rmb = await asyncio.to_thread(
                     self.services.cost.record_llm,
@@ -203,22 +366,53 @@ class AgentPipeline:
                 )
             if tts:
                 await tts.drain()
-            await self._send(ctx, "json", events.turn_end(usage.to_dict() if usage else {}, cost_rmb))
+            trace_status = "completed"
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            await step(
+                "complete",
+                "本轮回复已完成",
+                f"生成 {len(assistant_text):,} 个字符",
+                "done",
+            )
+            await self._send(
+                ctx,
+                "json",
+                events.turn_end(
+                    usage.to_dict() if usage else {},
+                    cost_rmb,
+                    turn_id,
+                    duration_ms,
+                ),
+            )
         except asyncio.CancelledError:
             logger.info("会话被中断（conversation=%s）", ctx.conversation_id)
+            trace_status = "cancelled"
             if tts:
                 tts.cancel()
             partial = "".join(assistant_parts).strip()
             if partial:
                 # fire-and-forget：取消路径里不能再 await
                 asyncio.create_task(asyncio.to_thread(
-                    self._save_message, ctx.conversation_id, "assistant", partial + "（已打断）"
+                    self._save_message, ctx.conversation_id, "assistant", partial + "（已打断）", turn_id
                 ))
             raise
         finally:
             flusher.cancel()
             heartbeat.cancel()
+            if trace_status == "running":
+                trace_status = "failed"
+            await asyncio.to_thread(
+                self._save_trace,
+                ctx.conversation_id,
+                turn_id,
+                trace_status,
+                trace_steps,
+                int((time.monotonic() - started_at) * 1000),
+                usage,
+                cost_rmb,
+            )
             ctx.turn_running = False
+            ctx.turn_id = None
             # 后台记忆提取（不阻塞、不打扰取消）
             if cfg.memory.auto_extract and assistant_parts:
                 asyncio.create_task(self._extract_memories(user_text, "".join(assistant_parts)))
@@ -349,16 +543,50 @@ class AgentPipeline:
             chars += len(r.content)
         return out
 
-    def _save_message(self, conversation_id: str, role: str, content: str) -> None:
+    def _save_message(
+        self,
+        conversation_id: str,
+        role: str,
+        content: str,
+        turn_id: str | None = None,
+    ) -> None:
         if not content.strip():
             return
         with self.services.db() as s:
-            s.add(Message(conversation_id=conversation_id, role=role, content=content))
+            s.add(Message(
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                role=role,
+                content=content,
+            ))
             conv = s.get(Conversation, conversation_id)
             if conv:
                 if not conv.title and role == "user":
                     conv.title = content[:30]
                 conv.updated_at = utcnow()
+            s.commit()
+
+    def _save_trace(
+        self,
+        conversation_id: str,
+        turn_id: str,
+        status: str,
+        steps: list[dict],
+        duration_ms: int,
+        usage,
+        cost_rmb: float,
+    ) -> None:
+        with self.services.db() as s:
+            row = s.get(TurnTrace, turn_id)
+            if row is None:
+                row = TurnTrace(id=turn_id, conversation_id=conversation_id)
+                s.add(row)
+            row.status = status
+            row.steps_json = json.dumps(steps, ensure_ascii=False)
+            row.duration_ms = duration_ms
+            row.prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+            row.completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            row.cost_rmb = cost_rmb
             s.commit()
 
     def _save_tool_call(self, conversation_id: str, call, result) -> None:

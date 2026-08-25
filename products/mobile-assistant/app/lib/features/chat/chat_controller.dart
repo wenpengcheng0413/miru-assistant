@@ -14,10 +14,81 @@ import '../../core/ws_client.dart';
 enum ChatPhase { idle, listening, thinking, speaking }
 
 class ChatLine {
-  ChatLine(this.kind, this.text);
+  ChatLine(
+    this.kind,
+    this.text, {
+    this.id = '',
+    this.turnId = '',
+    this.stats,
+    List<ProcessStep>? steps,
+  }) : steps = steps ?? <ProcessStep>[];
 
   final String kind; // user / miru / note
   final String text;
+  final String id;
+  final String turnId;
+  final TurnStats? stats;
+  final List<ProcessStep> steps;
+  bool processExpanded = false;
+}
+
+class ProcessStep {
+  ProcessStep({
+    required this.seq,
+    required this.phase,
+    required this.title,
+    required this.detail,
+    required this.status,
+  });
+
+  final int seq;
+  final String phase;
+  final String title;
+  final String detail;
+  final String status;
+
+  factory ProcessStep.fromJson(Map<dynamic, dynamic> json) => ProcessStep(
+        seq: (json['seq'] as num?)?.toInt() ?? 0,
+        phase: json['phase'] as String? ?? 'process',
+        title: json['title'] as String? ?? '处理中',
+        detail: json['detail'] as String? ?? '',
+        status: json['status'] as String? ?? 'done',
+      );
+}
+
+class TurnStats {
+  TurnStats({
+    required this.status,
+    required this.durationMs,
+    required this.promptTokens,
+    required this.completionTokens,
+    required this.costRmb,
+  });
+
+  final String status;
+  final int durationMs;
+  final int promptTokens;
+  final int completionTokens;
+  final double costRmb;
+
+  factory TurnStats.fromJson(Map<dynamic, dynamic> json) => TurnStats(
+        status: json['status'] as String? ?? 'completed',
+        durationMs: (json['duration_ms'] as num?)?.toInt() ?? 0,
+        promptTokens: (json['prompt_tokens'] as num?)?.toInt() ?? 0,
+        completionTokens: (json['completion_tokens'] as num?)?.toInt() ?? 0,
+        costRmb: (json['cost_rmb'] as num?)?.toDouble() ?? 0,
+      );
+
+  factory TurnStats.fromTurnEnd(Map<dynamic, dynamic> json) {
+    final usage = json['usage'] is Map ? json['usage'] as Map : const {};
+    return TurnStats(
+      status: 'completed',
+      durationMs: (json['duration_ms'] as num?)?.toInt() ?? 0,
+      promptTokens: (usage['prompt_tokens'] as num?)?.toInt() ?? 0,
+      completionTokens: (usage['completion_tokens'] as num?)?.toInt() ?? 0,
+      costRmb: (json['cost_rmb'] as num?)?.toDouble() ?? 0,
+    );
+  }
 }
 
 class ConversationBrief {
@@ -93,6 +164,10 @@ class ChatController extends ChangeNotifier {
   String miruText = ''; // 流式回答字幕
   String toolStatus = ''; // "正在读取群消息…"
   String progressStatus = '';
+  String activeTurnId = '';
+  final List<ProcessStep> activeProcessSteps = <ProcessStep>[];
+  bool activeProcessExpanded = true;
+  TurnStats? activeTurnStats;
   double lastCost = 0;
   final List<ConversationBrief> conversations = [];
   final List<PendingAttachment> pendingAttachments = [];
@@ -273,10 +348,39 @@ class ChatController extends ChangeNotifier {
         final role = row['role'] as String? ?? '';
         final content = (row['content'] as String?)?.trim() ?? '';
         if (content.isEmpty) continue;
+        final turnId = row['turn_id'] as String? ?? '';
+        final trace = row['trace'] is Map ? row['trace'] as Map : null;
+        final traceSteps = trace?['steps'] is List
+            ? (trace!['steps'] as List)
+                .whereType<Map>()
+                .map(ProcessStep.fromJson)
+                .toList()
+            : <ProcessStep>[];
+        final stats = trace == null ? null : TurnStats.fromJson(trace);
         if (role == 'user') {
-          history.add(ChatLine('user', content));
+          history.add(ChatLine('user', content, turnId: turnId));
+          // 后台任务尚未完成时，用户消息携带的 trace 是唯一可恢复的运行状态。
+          if (trace != null &&
+              trace['status'] == 'running' &&
+              turnId.isNotEmpty &&
+              activeTurnId.isEmpty) {
+            activeTurnId = turnId;
+            activeProcessSteps
+              ..clear()
+              ..addAll(traceSteps);
+            activeProcessExpanded = true;
+            phase = ChatPhase.thinking;
+            progressStatus = '正在继续后台任务…';
+          }
         } else if (role == 'assistant') {
-          history.add(ChatLine('miru', content));
+          history.add(ChatLine(
+            'miru',
+            content,
+            id: '${row['id'] ?? ''}',
+            turnId: turnId,
+            stats: stats,
+            steps: traceSteps,
+          ));
         }
       }
       if (history.isEmpty) return;
@@ -357,6 +461,7 @@ class ChatController extends ChangeNotifier {
     miruText = '';
     toolStatus = '';
     progressStatus = '';
+    _resetActiveTurn();
     ws.updateTarget(url: config.wsUri, token: config.token, hello: config.hello);
     wsStatus = '正在打开历史会话…';
     notifyListeners();
@@ -478,7 +583,9 @@ class ChatController extends ChangeNotifier {
           );
           _voiceAttachmentIdsInFlight.clear();
         }
-        _addUserLine(e['text'] as String? ?? '');
+        final serverTurnId = e['turn_id'] as String? ?? '';
+        _addUserLine(e['text'] as String? ?? '', turnId: serverTurnId);
+        if (serverTurnId.isNotEmpty) activeTurnId = serverTurnId;
         progressStatus = '正在处理…';
         // 消息已进聊天记录：清掉预填文本（语音自动发送后输入框不留残留）
         if (pendingInput.isNotEmpty) {
@@ -495,6 +602,23 @@ class ChatController extends ChangeNotifier {
         progressStatus = e['text'] as String? ?? '正在处理…';
         phase = ChatPhase.thinking;
         notifyListeners();
+      case 'process_step':
+        final turnId = e['turn_id'] as String? ?? '';
+        if (turnId.isNotEmpty && turnId != activeTurnId) {
+          activeTurnId = turnId;
+          activeProcessSteps.clear();
+          activeProcessExpanded = true;
+        }
+        final step = ProcessStep.fromJson(e);
+        final index = activeProcessSteps.indexWhere((item) => item.seq == step.seq);
+        if (index >= 0) {
+          activeProcessSteps[index] = step;
+        } else {
+          activeProcessSteps.add(step);
+        }
+        phase = ChatPhase.thinking;
+        progressStatus = step.title;
+        notifyListeners();
       case 'sentence':
         player.finishSentence(); // 上句音频收齐，入播放队列
         phase = ChatPhase.speaking;
@@ -508,32 +632,66 @@ class ChatController extends ChangeNotifier {
         notifyListeners();
       case 'turn_end':
         player.finishSentence(); // 兜底：flush 最后一句
+        final stats = TurnStats.fromTurnEnd(e);
         if (miruText.isNotEmpty) {
-          lines.add(ChatLine('miru', miruText));
+          final completed = ChatLine(
+            'miru',
+            miruText,
+            turnId: e['turn_id'] as String? ?? activeTurnId,
+            stats: stats,
+            steps: List<ProcessStep>.from(activeProcessSteps),
+          );
+          lines.add(completed);
           miruText = '';
         }
         lastCost = (e['cost_rmb'] as num?)?.toDouble() ?? 0;
         phase = ChatPhase.idle;
         progressStatus = '';
+        activeTurnStats = stats;
+        _resetActiveTurn(keepStats: true);
         notifyListeners();
         loadConversations();
       case 'server_note':
         lines.add(ChatLine('note', e['text'] as String? ?? ''));
         notifyListeners();
       case 'error':
+        if (miruText.isNotEmpty) {
+          lines.add(ChatLine(
+            'miru',
+            miruText,
+            turnId: activeTurnId,
+            stats: TurnStats(
+              status: 'failed',
+              durationMs: 0,
+              promptTokens: 0,
+              completionTokens: 0,
+              costRmb: 0,
+            ),
+            steps: List<ProcessStep>.from(activeProcessSteps),
+          ));
+          miruText = '';
+        }
         lines.add(ChatLine('note', '⚠️ ${e['message'] ?? e['code']}'));
         phase = ChatPhase.idle;
         progressStatus = '';
+        _resetActiveTurn();
         notifyListeners();
     }
   }
 
-  void _addUserLine(String text) {
+  void _addUserLine(String text, {String turnId = ''}) {
     if (text.isEmpty) return;
     if (lines.isNotEmpty && lines.last.kind == 'user' && lines.last.text == text) {
       return; // 去重（重发同一句时不重复显示）
     }
-    lines.add(ChatLine('user', text));
+    lines.add(ChatLine('user', text, turnId: turnId));
+  }
+
+  void _resetActiveTurn({bool keepStats = false}) {
+    activeTurnId = '';
+    activeProcessSteps.clear();
+    activeProcessExpanded = true;
+    if (!keepStats) activeTurnStats = null;
   }
 
   // ---- 操作 ----
@@ -681,6 +839,7 @@ class ChatController extends ChangeNotifier {
     miruText = '';
     toolStatus = '';
     progressStatus = '';
+    _resetActiveTurn();
     phase = ChatPhase.idle;
     notifyListeners();
   }

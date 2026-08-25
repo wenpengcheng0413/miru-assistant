@@ -37,5 +37,10 @@ def init_db(db_path: str | Path) -> sessionmaker[Session]:
         }
         if attachment_columns and "preview_paths" not in attachment_columns:
             conn.execute(text("ALTER TABLE attachments ADD COLUMN preview_paths TEXT NOT NULL DEFAULT '[]'"))
+        message_columns = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(messages)"))
+        }
+        if message_columns and "turn_id" not in message_columns:
+            conn.execute(text("ALTER TABLE messages ADD COLUMN turn_id TEXT"))
     SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
     return SessionLocal

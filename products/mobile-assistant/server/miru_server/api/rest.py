@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 
 from ..attachments import save_upload
-from ..db.models import ApiUsage, Attachment, Conversation, Message
+from ..db.models import ApiUsage, Attachment, Conversation, Message, TurnTrace
 from ..documents import extract as extract_document
 from ..stt.base import STTUnavailable
 from ..tts.base import VoiceConfig
@@ -136,8 +136,37 @@ async def conversation_messages(request: Request, conv_id: str, limit: int = 200
             .filter(Message.conversation_id == conv_id)
             .order_by(Message.id.desc()).limit(limit).all()
         )
+        turn_ids = {row.turn_id for row in rows if row.turn_id}
+        traces = {
+            row.id: row for row in db.query(TurnTrace).filter(TurnTrace.id.in_(turn_ids)).all()
+        } if turn_ids else {}
+
+        def trace_json(turn_id: str | None) -> dict | None:
+            if not turn_id or turn_id not in traces:
+                return None
+            trace = traces[turn_id]
+            try:
+                steps = json.loads(trace.steps_json or "[]")
+            except json.JSONDecodeError:
+                steps = []
+            return {
+                "status": trace.status,
+                "steps": steps,
+                "duration_ms": trace.duration_ms,
+                "prompt_tokens": trace.prompt_tokens,
+                "completion_tokens": trace.completion_tokens,
+                "cost_rmb": round(trace.cost_rmb, 4),
+            }
+
         return [
-            {"id": r.id, "role": r.role, "content": r.content, "created_at": r.created_at.isoformat()}
+            {
+                "id": r.id,
+                "role": r.role,
+                "content": r.content,
+                "turn_id": r.turn_id,
+                "trace": trace_json(r.turn_id),
+                "created_at": r.created_at.isoformat(),
+            }
             for r in reversed(rows)
         ]
 

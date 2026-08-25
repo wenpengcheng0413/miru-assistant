@@ -35,8 +35,8 @@ def stt_final(text: str, latency_ms: int) -> dict:
     return event({"type": "stt_final", "text": text, "latency_ms": latency_ms})
 
 
-def user_text(text: str) -> dict:
-    return event({"type": "user_text", "text": text})
+def user_text(text: str, turn_id: str = "") -> dict:
+    return event({"type": "user_text", "text": text, "turn_id": turn_id})
 
 
 def llm_delta(text: str) -> dict:
@@ -46,6 +46,25 @@ def llm_delta(text: str) -> dict:
 def progress(text: str, phase: str = "thinking") -> dict:
     """可重放的运行状态；用于在模型暂时没有 token 时证明任务仍在运行。"""
     return event({"type": "progress", "text": text, "phase": phase})
+
+
+def process_step(
+    turn_id: str,
+    seq: int,
+    phase: str,
+    title: str,
+    detail: str = "",
+    status: str = "running",
+) -> dict:
+    return event({
+        "type": "process_step",
+        "turn_id": turn_id,
+        "seq": seq,
+        "phase": phase,
+        "title": title,
+        "detail": detail,
+        "status": status,
+    })
 
 
 def sentence(text: str, audio_format: str, sample_rate: int, channels: int = 1) -> dict:
@@ -70,8 +89,19 @@ def tool_end(call_id: str, name: str, ok: bool, summary: str, duration_ms: int) 
     })
 
 
-def turn_end(usage: dict, cost_rmb: float) -> dict:
-    return event({"type": "turn_end", "usage": usage, "cost_rmb": round(cost_rmb, 4)})
+def turn_end(
+    usage: dict,
+    cost_rmb: float,
+    turn_id: str = "",
+    duration_ms: int = 0,
+) -> dict:
+    return event({
+        "type": "turn_end",
+        "turn_id": turn_id,
+        "usage": usage,
+        "duration_ms": duration_ms,
+        "cost_rmb": round(cost_rmb, 4),
+    })
 
 
 def server_note(text: str, level: str = "info") -> dict:

@@ -15,6 +15,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..core import events
 from ..core.pipeline import AgentPipeline, SessionContext, new_conversation_id
+from ..db.models import TurnTrace
 from ..stt.base import STTUnavailable
 from ..stt.vad import EnergyVAD
 from .deps import check_token
@@ -214,6 +215,26 @@ async def ws_session(websocket: WebSocket) -> None:
 
     if run_task is not None:
         await _safe_send(websocket, events.progress("正在继续后台任务…"))
+        # 新连接接管后台任务时回放已持久化的步骤，避免用户只看到“重连中”。
+        if ctx.turn_id:
+            with services.db() as db:
+                trace = db.get(TurnTrace, ctx.turn_id)
+            if trace is not None:
+                try:
+                    steps = json.loads(trace.steps_json or "[]")
+                except json.JSONDecodeError:
+                    steps = []
+                for item in steps:
+                    if not isinstance(item, dict):
+                        continue
+                    await _safe_send(websocket, events.process_step(
+                        ctx.turn_id,
+                        int(item.get("seq", 0)),
+                        str(item.get("phase", "process")),
+                        str(item.get("title", "处理中")),
+                        str(item.get("detail", "")),
+                        str(item.get("status", "done")),
+                    ))
 
     def start_run(text: str, attachment_ids: list[str] | None = None) -> None:
         nonlocal run_task

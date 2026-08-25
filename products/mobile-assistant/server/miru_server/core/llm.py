@@ -71,6 +71,7 @@ class ToolCallsDone:
 @dataclass
 class Done:
     usage: Usage
+    finish_reason: str | None = None
 
 
 @dataclass
@@ -100,6 +101,7 @@ class LLMClient:
         messages: list[dict],
         tools: list[dict] | None = None,
         model: str | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[LLMEvent]:
         """流式对话。可能的事件：TextDelta* → (ToolCallsDone) → Done；失败时 StreamError。"""
         kwargs = {
@@ -108,7 +110,7 @@ class LLMClient:
             "stream": True,
             "stream_options": {"include_usage": True},
             "temperature": self.cfg.temperature,
-            "max_tokens": self.cfg.max_tokens,
+            "max_tokens": max_tokens or self.cfg.max_tokens,
         }
         if tools:
             kwargs["tools"] = tools
@@ -122,6 +124,7 @@ class LLMClient:
                 visible = False
                 tool_calls = False
                 usage: Usage | None = None
+                finish_reason: str | None = None
                 async for ev in self._stream_once(kwargs):
                     if isinstance(ev, TextDelta):
                         visible = visible or bool(ev.text.strip())
@@ -131,15 +134,16 @@ class LLMClient:
                         yield ev
                     elif isinstance(ev, Done):
                         usage = ev.usage
+                        finish_reason = ev.finish_reason
                 # 某些网关在 thinking 参数被拒后仍只返回推理 token，
                 # 消耗满 max_tokens 却不给 content。扩大上限再试一次，
                 # 不能让客户端静默收到空回复。
                 if visible or tool_calls:
                     if usage is not None:
-                        yield Done(usage)
+                        yield Done(usage, finish_reason)
                     return
                 if attempt < 2:
-                    kwargs["max_tokens"] = min(max(int(kwargs["max_tokens"]) * 2, 4096), 8192)
+                    kwargs["max_tokens"] = min(max(int(kwargs["max_tokens"]) * 2, 4096), self.cfg.max_tokens)
                     kwargs.pop("extra_body", None)
                     logger.warning("LLM 返回空可见内容，扩大输出上限后重试（max_tokens=%s）", kwargs["max_tokens"])
                     continue
@@ -175,6 +179,7 @@ class LLMClient:
         # 流式工具调用：按 index 归并分片
         acc: dict[int, dict] = {}
         usage: Usage | None = None
+        finish_reason: str | None = None
 
         async for chunk in stream:
             if chunk.usage is not None:
@@ -188,6 +193,8 @@ class LLMClient:
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
             delta = choice.delta
             if delta.content:
                 yield TextDelta(delta.content)
@@ -212,7 +219,7 @@ class LLMClient:
                 completion_tokens=0,
                 estimated=True,
             )
-        yield Done(usage)
+        yield Done(usage, finish_reason)
 
 
     async def chat_json(self, system: str, user: str, temperature: float = 0.1) -> dict:

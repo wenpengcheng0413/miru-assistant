@@ -149,30 +149,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     itemBuilder: (context, i) {
                       if (i == c.lines.length) return _liveArea();
                       final line = c.lines[i];
-                      return Align(
-                        alignment: line.kind == 'user'
-                            ? Alignment.centerRight
-                            : Alignment.centerLeft,
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: line.kind == 'user'
-                                ? Theme.of(context).colorScheme.primaryContainer
-                                : line.kind == 'note'
-                                    ? Theme.of(context)
-                                        .colorScheme
-                                        .surfaceContainerHighest
-                                    : Theme.of(context)
-                                        .colorScheme
-                                        .surfaceContainerHigh,
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Text(line.text,
-                              style: const TextStyle(fontSize: 15)),
-                        ),
-                      );
+                      return _messageBubble(line);
                     },
                   ),
                 ),
@@ -244,6 +221,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       ));
     }
+    if (c.activeProcessSteps.isNotEmpty) {
+      parts.add(_processPanel(
+        c.activeProcessSteps,
+        expanded: c.activeProcessExpanded,
+        onToggle: () {
+          c.activeProcessExpanded = !c.activeProcessExpanded;
+          c.notifyListeners();
+        },
+      ));
+    }
     if (c.phase == ChatPhase.thinking && c.miruText.isEmpty && c.toolStatus.isEmpty) {
       parts.add(Padding(
         padding: const EdgeInsets.only(top: 8),
@@ -259,6 +246,205 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: parts);
   }
+
+  Widget _messageBubble(ChatLine line) {
+    final scheme = Theme.of(context).colorScheme;
+    final isUser = line.kind == 'user';
+    final isNote = line.kind == 'note';
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+        decoration: BoxDecoration(
+          color: isUser
+              ? scheme.primaryContainer
+              : isNote
+                  ? scheme.surfaceContainerHighest
+                  : scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: SelectableText(
+                    line.text,
+                    style: const TextStyle(fontSize: 15),
+                  ),
+                ),
+                if (isUser || line.kind == 'miru')
+                  IconButton(
+                    tooltip: '复制',
+                    visualDensity: VisualDensity.compact,
+                    iconSize: 18,
+                    icon: const Icon(Icons.copy_outlined),
+                    onPressed: () => _copyText(line.text),
+                  ),
+              ],
+            ),
+            if (line.kind == 'miru' && line.steps.isNotEmpty)
+              _processPanel(
+                line.steps,
+                expanded: line.processExpanded,
+                onToggle: () {
+                  line.processExpanded = !line.processExpanded;
+                  setState(() {});
+                },
+              ),
+            if (line.kind == 'miru' && line.stats != null)
+              _completionMeta(line.stats!),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _completionMeta(TurnStats stats) {
+    final completed = stats.status == 'completed';
+    final seconds = stats.durationMs <= 0 ? 0 : stats.durationMs / 1000;
+    final parts = <String>[
+      completed ? '本轮已完成' : '本轮未完成',
+      if (stats.durationMs > 0) '${seconds.toStringAsFixed(1)} 秒',
+      if (stats.completionTokens > 0) '生成 ${stats.completionTokens} tokens',
+      if (stats.costRmb > 0) '¥${stats.costRmb.toStringAsFixed(3)}',
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, right: 4),
+      child: Row(
+        children: [
+          Icon(
+            completed ? Icons.check_circle_outline : Icons.error_outline,
+            size: 14,
+            color: completed
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.error,
+          ),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              parts.join(' · '),
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _processPanel(
+    List<ProcessStep> steps, {
+    required bool expanded,
+    required VoidCallback onToggle,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, right: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: onToggle,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 18,
+                  ),
+                  Text(
+                    '处理过程（${steps.length} 个步骤）',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '复制处理过程',
+                    visualDensity: VisualDensity.compact,
+                    iconSize: 16,
+                    icon: const Icon(Icons.copy_outlined),
+                    onPressed: () => _copyText(_processText(steps)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded)
+            ...steps.map(
+              (step) => Padding(
+                padding: const EdgeInsets.only(left: 8, top: 3),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      step.status == 'error'
+                          ? Icons.error_outline
+                          : step.status == 'running'
+                              ? Icons.more_horiz
+                              : Icons.check,
+                      size: 14,
+                      color: step.status == 'error'
+                          ? scheme.error
+                          : scheme.primary,
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: SelectableText(
+                        step.detail.isEmpty
+                            ? step.title
+                            : '${step.title}：${step.detail}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '复制步骤',
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 16,
+                      icon: const Icon(Icons.copy_outlined),
+                      onPressed: () => _copyText(
+                        step.detail.isEmpty
+                            ? step.title
+                            : '${step.title}：${step.detail}',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _copyText(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已复制'), duration: Duration(milliseconds: 900)),
+    );
+  }
+
+  String _processText(List<ProcessStep> steps) => steps
+      .map((step) => step.detail.isEmpty
+          ? step.title
+          : '${step.title}：${step.detail}')
+      .join('\n');
 
   Widget _bottomBar(BuildContext context) {
     final thinking = c.phase == ChatPhase.thinking;

@@ -32,8 +32,27 @@ class Message(Base):
     conversation_id: Mapped[str] = mapped_column(
         Text, ForeignKey("conversations.id", ondelete="CASCADE"), index=True
     )
+    turn_id: Mapped[str | None] = mapped_column(Text, index=True, nullable=True)
     role: Mapped[str] = mapped_column(Text)  # user / assistant / tool / system
     content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TurnTrace(Base):
+    """可安全展示的执行阶段摘要，不保存模型隐藏推理链。"""
+
+    __tablename__ = "turn_traces"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(Text, default="running")
+    steps_json: Mapped[str] = mapped_column(Text, default="[]")
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_rmb: Mapped[float] = mapped_column(REAL, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

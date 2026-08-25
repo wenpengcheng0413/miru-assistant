@@ -39,7 +39,8 @@ class LLMConfig(BaseModel):
     vision_model: str = "deepseek-v4-flash-vision-exp"
     thinking: bool = False
     temperature: float = 0.7
-    max_tokens: int = 2048
+    max_tokens: int = 8192
+    short_max_tokens: int = 2048
     timeout_s: float = 90.0
     max_tool_rounds: int = 6
 

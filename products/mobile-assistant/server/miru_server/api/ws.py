@@ -84,6 +84,14 @@ class VoiceSession:
             logger.warning("录音窗口超过 %.0fs 未收到 audio_end，强制丢弃", self._recording_timeout)
             self._recording = False
             self.vad = EnergyVAD(self.cfg.stt.vad)
+            if self._partial_task and not self._partial_task.done():
+                self._partial_task.cancel()
+                self._partial_task = None
+            # 手机切后台或系统吞掉抬起事件时，不能让客户端永久停在“处理中”。
+            await _safe_send(self.ws, events.error(
+                "recording_timeout",
+                "录音超时，未收到结束信号，请重新按住说话。",
+            ))
 
     async def on_audio(self, pcm: bytes) -> None:
         if not self._recording:

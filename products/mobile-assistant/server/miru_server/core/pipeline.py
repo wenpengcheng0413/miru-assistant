@@ -366,7 +366,18 @@ class AgentPipeline:
                     self.services.cost.record_local, "stt", self.services.stt.name, ctx.conversation_id
                 )
             if tts:
-                await tts.drain()
+                try:
+                    # 语音合成是辅助输出，不能阻塞文字回复和 turn_end。
+                    await asyncio.wait_for(tts.drain(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    logger.warning("TTS 队列超时，优先结束文字回复（conversation=%s）", ctx.conversation_id)
+                    tts.cancel()
+                    await step(
+                        "generation",
+                        "文字回复已完成",
+                        "语音合成超时，已优先保留文字内容",
+                        "done",
+                    )
             trace_status = "completed"
             duration_ms = int((time.monotonic() - started_at) * 1000)
             await step(

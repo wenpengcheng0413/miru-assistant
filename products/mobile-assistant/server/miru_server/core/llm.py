@@ -252,6 +252,30 @@ class LLMClient:
             logger.warning("chat_json 解析失败: %s", text[:200])
             return {}
 
+    async def vision_chat(
+        self,
+        messages: list[dict],
+        model: str | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """对包含 image_url 内容块的消息做一次视觉问答。
+
+        复用流式客户端的重试、thinking 兼容和错误处理逻辑；该方法只返回
+        可见文本，适合由本地工具在用户明确要求时调用视觉模型。
+        """
+        parts: list[str] = []
+        async for event in self.stream_chat(
+            messages,
+            tools=None,
+            model=model or self.cfg.vision_model,
+            max_tokens=max_tokens or min(self.cfg.max_tokens, 1200),
+        ):
+            if isinstance(event, TextDelta):
+                parts.append(event.text)
+            elif isinstance(event, StreamError):
+                raise RuntimeError(event.message)
+        return "".join(parts).strip()
+
 
 def _parse_call(slot: dict) -> ToolCallSpec:
     try:

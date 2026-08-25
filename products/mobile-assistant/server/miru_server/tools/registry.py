@@ -90,6 +90,7 @@ def build_registry(config: Any) -> ToolRegistry:
         WechatDatasetPageTool,
         WechatSearchMessagesTool,
         WechatTranscribeVoiceTool,
+        WechatImageAnalysisTool,
     )
 
     enabled = list(config.tools.enabled)
@@ -99,6 +100,7 @@ def build_registry(config: Any) -> ToolRegistry:
         enabled.extend([
             "wechat_recent_contacts", "wechat_conversation_digest", "wechat_dataset_page",
             "wechat_recent_activity",
+            "wechat_image_analysis",
         ])
     return ToolRegistry(
         tools=[
@@ -119,6 +121,7 @@ def build_registry(config: Any) -> ToolRegistry:
             WechatConversationDigestTool,
             WechatDatasetPageTool,
             WechatTranscribeVoiceTool,
+            WechatImageAnalysisTool,
             WechatGroupListTool,
             WechatGroupDigestTool,
         ],

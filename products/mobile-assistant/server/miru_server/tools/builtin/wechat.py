@@ -19,6 +19,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..base import Tool, ToolContext, ToolResult
+from ...attachments import image_content_block
 from ...wechat_runtime import data_root_for, ensure_miru_import_path, runtime_diagnostics
 
 logger = logging.getLogger(__name__)
@@ -226,6 +227,40 @@ def _format_messages(messages: list, self_wxid: str = "") -> list[str]:
         who = "我" if is_self else (m.sender or "对方")
         lines.append(f"[{t}] {who}: {_clean_content(m.content)}")
     return lines
+
+
+def _image_md5(raw: str) -> str:
+    """从微信图片 XML 中提取 CDN md5（仅用于本地文件匹配）。"""
+    match = re.search(r'\bmd5=["\']([0-9a-fA-F]{16,64})["\']', raw or "")
+    return match.group(1).lower() if match else ""
+
+
+def _export_image(extractor, wxid: str, message, export_dir: Path, used: set[Path]) -> tuple[Path | None, str]:
+    """提取一条图片消息，优先使用可供视觉模型读取的缩略图。"""
+    md5 = _image_md5(getattr(message, "raw_content", "")) or _image_md5(getattr(message, "content", ""))
+    candidates = extractor.locate_thumb(wxid, message.timestamp, md5)
+    candidates += [p for p in extractor.locate_files(wxid, message.timestamp, md5) if p not in candidates]
+    if not candidates:
+        return None, "未找到对应的微信图片文件"
+    # 同一会话可能有多条图片，优先挑离消息时间最近且尚未使用的文件。
+    ordered = sorted(candidates, key=lambda p: abs(p.stat().st_mtime - message.timestamp) if p.exists() else 10**18)
+    ordered += [p for p in candidates if p not in ordered]
+    for dat_path in ordered:
+        if dat_path in used:
+            continue
+        data = extractor.decrypt(dat_path)
+        if not data:
+            continue
+        ext = extractor.sniff_format(data)
+        if ext not in {"jpg", "png", "gif", "webp", "bmp"}:
+            continue
+        stem = f"wechat_{int(message.timestamp)}_{int(getattr(message, 'server_id', 0) or 0)}"
+        out = export_dir / f"{stem}.{ext}"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(data)
+        used.add(dat_path)
+        return out, ""
+    return None, "图片已找到但解密后格式不可供视觉模型读取"
 
 
 class WechatContactListTool(Tool):
@@ -635,6 +670,106 @@ class WechatTranscribeVoiceTool(Tool):
             {"contact": contact, "days": days, "voice_total": total, "transcribed": ok, "items": rows},
             summary=f"已转写 {ok}/{total} 条微信语音（本机处理）",
         )
+
+
+class WechatImageAnalysisTool(Tool):
+    """本地解密微信图片，并在用户明确要求时交给 DeepSeek Vision。"""
+
+    name = "wechat_image_analysis"
+    timeout_s = 300.0
+    max_result_chars = 30000
+    description = (
+        "查看微信聊天中的照片具体内容。用户说‘看看我和某人的照片/图片里有什么/读一下这张图’时使用；"
+        "先在本机从微信 .dat 文件提取并解密图片，再逐张发送给配置的 DeepSeek 视觉模型分析。"
+        "图片原始文件不会回传手机或作为聊天全文，只有视觉描述返回。contact 可为联系人或群名。"
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "contact": {"type": "string", "description": "联系人或群显示名"},
+            "days": {"type": "integer", "description": "最近几天，默认 7，最大 365", "default": 7},
+            "limit": {"type": "integer", "description": "最多分析图片数，默认 5，最大 20", "default": 5},
+        },
+        "required": ["contact"],
+    }
+
+    async def run(self, ctx: ToolContext, contact: str, days: int = 7, limit: int = 5) -> ToolResult:
+        days = max(1, min(int(days), 365))
+        limit = max(1, min(int(limit), 20))
+        await _step(ctx, "wechat", "正在提取微信图片", f"{contact}，最近 {days} 天，最多 {limit} 张")
+
+        def _extract() -> tuple[dict, list[Path], list[str]]:
+            from miru.chat_analyzer.media.image import ImageExtractor
+
+            db = _db(ctx)
+            try:
+                info = _resolve_contact(db, contact)
+                cutoff = time.time() - days * 86400
+                messages = [
+                    m for m in _resolve_session_messages(db, info["username"])
+                    if m.msg_type == 3 and m.timestamp >= cutoff
+                ][-limit:]
+                safe_conversation = re.sub(r"[^A-Za-z0-9_.-]", "_", ctx.conversation_id or "conversation")[:80]
+                export_dir = Path(ctx.services.config.config_dir).parent / "data" / "wechat_media" / safe_conversation
+                extractor = ImageExtractor(db.account_dir)
+                used: set[Path] = set()
+                rows: list[dict] = []
+                paths: list[Path] = []
+                warnings: list[str] = []
+                self_wxid = _self_wxid(db)
+                for message in messages:
+                    path, warning = _export_image(extractor, info["username"], message, export_dir, used)
+                    sender = "我" if (message.sender == "我" or (self_wxid and message.sender_username == self_wxid)) else (message.sender or "对方")
+                    row = {
+                        "time": datetime.fromtimestamp(message.timestamp, _WECHAT_TZ).strftime("%Y-%m-%d %H:%M"),
+                        "sender": sender,
+                        "ok": bool(path),
+                    }
+                    if path:
+                        row["_path"] = path
+                        paths.append(path)
+                    else:
+                        row["error"] = warning or "图片提取失败"
+                        warnings.append(f"{row['time']}：{row['error']}")
+                    rows.append(row)
+                return {"contact": contact, "days": days, "image_count": len(messages), "items": rows}, paths, warnings
+            finally:
+                db.close()
+
+        try:
+            data, paths, warnings = await asyncio.to_thread(_extract)
+        except Exception as exc:
+            return ToolResult.failure(f"微信图片读取失败：{exc}")
+        if not paths:
+            return ToolResult.success(
+                {**data, "analyzed": 0, "warnings": warnings or ["时间范围内没有可解密的图片"]},
+                summary=f"{contact} 最近 {days} 天没有可分析的图片",
+            )
+
+        await _step(ctx, "vision", f"正在分析 {len(paths)} 张图片", "图片仅发送给配置的视觉模型")
+        for row, path in zip((r for r in data["items"] if r.get("_path")), paths):
+            try:
+                block = image_content_block(path)
+                prompt = (
+                    "请用中文客观描述这张微信图片的具体内容。优先说明人物/物体、文字、场景和可确认的细节；"
+                    "看不清或无法确认的内容请明确说看不清，不要猜测。控制在 200 字以内。"
+                )
+                row["description"] = await ctx.services.llm.vision_chat(
+                    [{"role": "user", "content": [{"type": "text", "text": prompt}, block]}],
+                    model=ctx.services.config.llm.vision_model,
+                    max_tokens=500,
+                )
+                row["analyzed"] = bool(row["description"])
+                if not row["description"]:
+                    row["error"] = "视觉模型返回空内容"
+            except Exception as exc:
+                row["error"] = f"视觉模型分析失败：{str(exc)[:160]}"
+                row["analyzed"] = False
+            finally:
+                row.pop("_path", None)
+        data["analyzed"] = sum(1 for item in data["items"] if item.get("analyzed"))
+        data["warnings"] = warnings
+        return ToolResult.success(data, summary=f"已提取并分析 {data['analyzed']}/{len(paths)} 张微信图片")
 
 
 class WechatRecentContactsTool(Tool):

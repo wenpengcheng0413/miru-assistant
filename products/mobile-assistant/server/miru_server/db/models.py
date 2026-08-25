@@ -89,6 +89,49 @@ class WechatVoiceTranscript(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class WechatSync(Base):
+    """微信离线快照同步记录；源数据库永远不由 Miru 修改。"""
+
+    __tablename__ = "wechat_syncs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    snapshot_dir: Mapped[str] = mapped_column(Text)
+    source_dir: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(Text, default="running")
+    wx_version: Mapped[str] = mapped_column(Text, default="")
+    file_count: Mapped[int] = mapped_column(Integer, default=0)
+    contact_count: Mapped[int] = mapped_column(Integer, default=0)
+    message_shard_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class WechatContact(Base):
+    __tablename__ = "wechat_contacts"
+
+    username: Mapped[str] = mapped_column(Text, primary_key=True)
+    display_name: Mapped[str] = mapped_column(Text, default="", index=True)
+    nickname: Mapped[str] = mapped_column(Text, default="")
+    remark: Mapped[str] = mapped_column(Text, default="")
+    is_group: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    sync_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class WechatMessageIndex(Base):
+    __tablename__ = "wechat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(Text, index=True)
+    server_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    timestamp: Mapped[int] = mapped_column(Integer, index=True)
+    msg_type: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    sender: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    sync_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
+
 class ToolCall(Base):
     __tablename__ = "tool_calls"
 

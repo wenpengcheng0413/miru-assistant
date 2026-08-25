@@ -21,11 +21,14 @@ from .db.backup import backup_database
 from .discovery import LanServiceAdvertiser
 from .logging_setup import setup_logging
 from .services import create_services
+from .wechat_runtime import ensure_miru_import_path
 
 logger = logging.getLogger(__name__)
 
 
 def create_app(config: AppConfig) -> FastAPI:
+    # 后台服务与命令行使用同一份微信离线读取包，避免仅交互式 shell 可导入。
+    ensure_miru_import_path()
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         import asyncio

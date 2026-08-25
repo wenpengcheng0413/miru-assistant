@@ -15,6 +15,7 @@ from sqlalchemy import func, or_, select
 
 from ..attachments import save_upload
 from ..db.models import ApiUsage, Attachment, Conversation, Message, TurnTrace
+from ..wechat_runtime import runtime_diagnostics, sync_snapshot, sync_status
 from ..documents import extract as extract_document
 from ..stt.base import STTUnavailable
 from ..tts.base import VoiceConfig
@@ -41,14 +42,32 @@ def _attachment_json(row: Attachment) -> dict:
 @router.get("/health")
 async def health(request: Request):
     s = _svc(request)
+    wechat = await asyncio.to_thread(runtime_diagnostics, s.config)
     return {
         "status": "ok",
         "llm_model": s.config.llm.model,
         "stt_engine": s.stt.name,
         "tts_provider": s.tts_provider.name if s.tts_provider else "none",
         "wechat_tools": any(n.startswith("wechat_") for n in s.tools.enabled_names),
+        "wechat": wechat,
         "version": __import__("miru_server").__version__,
     }
+
+
+@router.post("/wechat/sync")
+async def wechat_sync(request: Request):
+    """把当前已同步到电脑的微信数据复制为 Miru 离线快照。"""
+    s = _svc(request)
+    try:
+        return await asyncio.to_thread(sync_snapshot, s.config, s.db)
+    except Exception as exc:
+        raise HTTPException(503, f"微信离线同步失败: {exc}") from exc
+
+
+@router.get("/wechat/sync/status")
+async def wechat_sync_status(request: Request):
+    s = _svc(request)
+    return await asyncio.to_thread(sync_status, s.config, s.db)
 
 
 @router.get("/tools")

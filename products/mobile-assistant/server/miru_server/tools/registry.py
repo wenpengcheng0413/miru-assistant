@@ -52,10 +52,11 @@ class ToolRegistry:
         started = time.monotonic()
         try:
             result = await asyncio.wait_for(
-                tool_cls().run(ctx, **args), timeout=DEFAULT_TOOL_TIMEOUT_S
+                tool_cls().run(ctx, **args), timeout=float(getattr(tool_cls, "timeout_s", DEFAULT_TOOL_TIMEOUT_S))
             )
         except asyncio.TimeoutError:
-            result = ToolResult.failure(f"工具 {name} 执行超时（>{DEFAULT_TOOL_TIMEOUT_S:.0f}s）")
+            timeout_s = float(getattr(tool_cls, "timeout_s", DEFAULT_TOOL_TIMEOUT_S))
+            result = ToolResult.failure(f"工具 {name} 执行超时（>{timeout_s:.0f}s），可缩小时间范围或分批查询")
         except Exception as e:
             logger.exception("工具 %s 执行异常", name)
             result = ToolResult.failure(f"工具 {name} 执行异常: {e}")
@@ -81,10 +82,20 @@ def build_registry(config: Any) -> ToolRegistry:
         WechatGroupDigestTool,
         WechatGroupListTool,
         WechatRecentMessagesTool,
+        WechatRecentContactsTool,
+        WechatConversationDigestTool,
+        WechatDatasetPageTool,
         WechatSearchMessagesTool,
         WechatTranscribeVoiceTool,
     )
 
+    enabled = list(config.tools.enabled)
+    # 旧 settings.yaml 只列出旧微信工具时，自动启用新的固定工作流，
+    # 这样升级服务端无需手工编辑被忽略的本机配置文件。
+    if any(name.startswith("wechat_") for name in enabled):
+        enabled.extend([
+            "wechat_recent_contacts", "wechat_conversation_digest", "wechat_dataset_page",
+        ])
     return ToolRegistry(
         tools=[
             GetCurrentTimeTool,
@@ -99,9 +110,12 @@ def build_registry(config: Any) -> ToolRegistry:
             WechatChatStatsTool,
             WechatSearchMessagesTool,
             WechatRecentMessagesTool,
+            WechatRecentContactsTool,
+            WechatConversationDigestTool,
+            WechatDatasetPageTool,
             WechatTranscribeVoiceTool,
             WechatGroupListTool,
             WechatGroupDigestTool,
         ],
-        enabled=config.tools.enabled,
+        enabled=enabled,
     )

@@ -103,6 +103,9 @@ class PersonaConfig(BaseModel):
 class WeChatToolConfig(BaseModel):
     llm_visibility: str = "aggregates"  # aggregates | samples | raw
     data_root: str = ""
+    snapshot_dir: str = "./data/wechat_snapshot"
+    snapshot_max_age_hours: float = 168.0
+    sync_copy_media: bool = True
 
 
 class ToolsConfig(BaseModel):

@@ -11,7 +11,9 @@ from typing import Any, Awaitable, Callable, ClassVar
 class ToolContext:
     services: Any                       # miru_server.services.Services
     conversation_id: str
-    emit: Callable[[dict], Awaitable[None]] = field(default=lambda _: _noop())
+    turn_id: str = ""
+    process_seq: int = 0
+    emit: Callable[[dict], Awaitable[None]] = field(default=lambda _: _noop({}))
 
 
 async def _noop(_: dict) -> None:
@@ -55,6 +57,7 @@ class Tool(ABC):
     }
     require_confirm: ClassVar[bool] = False  # 高危工具需用户确认（MVP2+）
     max_result_chars: ClassVar[int] = 8000
+    timeout_s: ClassVar[float] = 30.0
 
     @abstractmethod
     async def run(self, ctx: ToolContext, **kwargs) -> ToolResult: ...

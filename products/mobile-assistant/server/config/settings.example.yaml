@@ -80,6 +80,7 @@ tools:
   wechat:
     llm_visibility: aggregates   # aggregates | samples | raw（见 ../docs/04-Tool与Skill系统.md）
     data_root: ""                # 空 = 复用现有 V2 的自动探测/配置
+    snapshot_dir: ./data/wechat_snapshot
 
 budget:
   hard_block: false          # true = 超预算直接拒绝 LLM 调用

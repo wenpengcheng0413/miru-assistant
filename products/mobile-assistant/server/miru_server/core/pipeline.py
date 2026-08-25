@@ -320,6 +320,8 @@ class AgentPipeline:
                         ToolContext(
                             services=self.services,
                             conversation_id=ctx.conversation_id,
+                            turn_id=turn_id,
+                            process_seq=len(trace_steps),
                             emit=lambda p: self._send(ctx, "json", p),
                         ),
                         call.name,
@@ -334,7 +336,9 @@ class AgentPipeline:
                         getattr(result, "summary", "工具执行完成") or "工具执行完成",
                         "done" if result.ok else "error",
                     )
-                    tool_msgs.append(tool_result_message(call, result.to_llm()))
+                    tool_cls = self.services.tools.get(call.name)
+                    max_chars = int(getattr(tool_cls, "max_result_chars", 8000)) if tool_cls else 8000
+                    tool_msgs.append(tool_result_message(call, result.to_llm(max_chars=max_chars)))
                 messages.append(assistant_toolcall_message(calls))
                 messages.extend(tool_msgs)
             else:
@@ -607,7 +611,7 @@ class AgentPipeline:
                 conversation_id=conversation_id,
                 name=call.name,
                 args=json.dumps(call.arguments, ensure_ascii=False, default=str),
-                result=result.to_llm() if result else None,
+                result=result.to_llm(max_chars=24000) if result else None,
                 ok=int(result.ok) if result else 0,
             ))
             s.commit()

@@ -13,12 +13,15 @@ import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from ..base import Tool, ToolContext, ToolResult
 import time
+from ...wechat_runtime import data_root_for, ensure_miru_import_path, runtime_diagnostics
 
 logger = logging.getLogger(__name__)
 
+ensure_miru_import_path()
 try:
     from miru.chat_analyzer.offline_reader import OfflineWeChatDB
     from miru.chat_analyzer.statistics import ChatMessageRecord, compute_statistics
@@ -59,11 +62,33 @@ def _clean_content(content: str, max_len: int = 500) -> str:
 
 
 def _db(ctx: ToolContext) -> "OfflineWeChatDB":
-    if not WECHAT_OK:
-        raise RuntimeError("本机未安装现有 miru 包（微信工具不可用）")
-    data_root = ctx.services.config.tools.wechat.data_root
+    global WECHAT_OK, OfflineWeChatDB
+    if not WECHAT_OK or OfflineWeChatDB is None:
+        ensure_miru_import_path()
+        try:
+            from miru.chat_analyzer.offline_reader import OfflineWeChatDB as reader
+            OfflineWeChatDB = reader
+            WECHAT_OK = True
+        except Exception as exc:
+            diag = runtime_diagnostics(ctx.services.config)
+            raise RuntimeError(
+                f"微信工具不可用：{exc}。请确认服务使用 daily-report/src，"
+                f"数据目录={diag.get('data_dir') or '未找到'}"
+            ) from exc
+    data_root = data_root_for(ctx.services.config)
     # 同步构造放到线程里（内部有文件 IO）
     return OfflineWeChatDB(data_root or "")
+
+
+async def _step(ctx: ToolContext, phase: str, title: str, detail: str = "", status: str = "done") -> None:
+    """给手机端发送安全的执行摘要；不会包含模型隐藏推理。"""
+    if not ctx.emit:
+        return
+    ctx.process_seq += 1
+    await ctx.emit({
+        "type": "process_step", "turn_id": ctx.turn_id, "seq": ctx.process_seq,
+        "phase": phase, "title": title, "detail": detail, "status": status,
+    })
 
 
 def _search_contacts(db, query: str = "", limit: int = 20) -> list[dict]:
@@ -215,6 +240,7 @@ class WechatContactListTool(Tool):
 
 class WechatChatStatsTool(Tool):
     name = "wechat_chat_stats"
+    timeout_s = 60.0
     description = (
         "统计与某个联系人或群的聊天数据：消息总数、双方发送数、主动发起次数、回复比例、"
         "时间分布、高频词。用户问'我最近和 XX 聊天多吗/关系怎么样'时使用。"
@@ -294,6 +320,8 @@ class WechatSearchMessagesTool(Tool):
 
 class WechatRecentMessagesTool(Tool):
     name = "wechat_recent_messages"
+    timeout_s = 60.0
+    max_result_chars = 30000
     description = (
         "读取与某联系人或群最近几天的聊天记录**全文**（含时间与说话人，本地读取）。"
         "用户说'查聊天记录 / 最近聊了什么 / 把聊天内容读一遍再分析 / 我们聊了啥'时用它——"
@@ -347,6 +375,8 @@ class WechatTranscribeVoiceTool(Tool):
     """把微信语音在本机解码、转写，并以可引用的文本交给后续分析。"""
 
     name = "wechat_transcribe_voice"
+    timeout_s = 300.0
+    max_result_chars = 30000
     description = (
         "转写与某联系人或群的微信语音消息。语音 SILK 解码和语音识别均在本机完成，"
         "返回每条语音的时间、发送者和转写文本。用户问'语音里说了什么/把语音内容也纳入分析'时使用。"
@@ -356,14 +386,16 @@ class WechatTranscribeVoiceTool(Tool):
         "properties": {
             "contact": {"type": "string", "description": "联系人或群显示名"},
             "days": {"type": "integer", "description": "最近几天，默认 30", "default": 30},
-            "limit": {"type": "integer", "description": "最多转写几条，默认 20，最大 50", "default": 20},
+            "limit": {"type": "integer", "description": "最多转写几条，默认 20，最大 500", "default": 20},
         },
         "required": ["contact"],
     }
 
     async def run(self, ctx: ToolContext, contact: str, days: int = 30, limit: int = 20) -> ToolResult:
         days = max(1, min(days, 3650))
-        limit = max(1, min(limit, 50))
+        limit = max(1, min(limit, 500))
+
+        await _step(ctx, "wechat", "正在检查微信离线快照", "默认读取最近一次同步的数据")
 
         def _do() -> tuple[list[dict], int]:
             from miru.chat_analyzer.media.voice import VoiceExtractor
@@ -380,13 +412,14 @@ class WechatTranscribeVoiceTool(Tool):
                 self_wxid = _self_wxid(db)
                 extractor = VoiceExtractor(db)
                 output: list[dict] = []
-                for message in voices:
+                voice_data = extractor.iter_voice_ids([int(m.server_id) for m in voices if m.server_id])
+                for index, message in enumerate(voices, 1):
                     with ctx.services.db() as session:
                         cached = session.get(WechatVoiceTranscript, message.server_id)
                     text = cached.transcript if cached else ""
                     error = ""
                     if not text:
-                        silk = extractor.get_voice_data(message.server_id)
+                        silk = voice_data.get(int(message.server_id))
                         if not silk:
                             error = "未找到语音原始数据"
                         else:
@@ -416,6 +449,9 @@ class WechatTranscribeVoiceTool(Tool):
                         "transcript": text,
                         "error": error,
                     })
+                    if index % 5 == 0:
+                        # 线程中不能直接 await；进度由外层按结果数量补充。
+                        logger.info("微信语音转写进度 %d/%d", index, len(voices))
                 return output, len(voices)
             finally:
                 db.close()
@@ -425,10 +461,116 @@ class WechatTranscribeVoiceTool(Tool):
         except Exception as e:
             return ToolResult.failure(f"微信语音转写失败: {e}")
         ok = sum(1 for row in rows if row["transcript"])
+        await _step(ctx, "voice", f"已完成 {ok}/{total} 条语音转写", "失败项已保留原因")
         return ToolResult.success(
             {"contact": contact, "days": days, "voice_total": total, "transcribed": ok, "items": rows},
             summary=f"已转写 {ok}/{total} 条微信语音（本机处理）",
         )
+
+
+class WechatRecentContactsTool(Tool):
+    name = "wechat_recent_contacts"
+    description = (
+        "列出本地微信快照中最近可用的联系人和群聊。默认最多返回前 5 个，"
+        "用于先确认目标，再调用 wechat_conversation_digest。微信无需保持运行。"
+    )
+    parameters = {"type": "object", "properties": {
+        "limit": {"type": "integer", "default": 5, "description": "最多返回条数，默认 5"},
+    }}
+
+    async def run(self, ctx: ToolContext, limit: int = 5) -> ToolResult:
+        limit = max(1, min(limit, 100))
+        await _step(ctx, "wechat", "正在读取联系人", "来源为本地离线快照")
+        def _do():
+            db = _db(ctx)
+            try:
+                contacts = db.get_contacts()
+                return contacts[:limit], len(contacts)
+            finally:
+                db.close()
+        try:
+            contacts, total = await asyncio.to_thread(_do)
+        except Exception as exc:
+            return ToolResult.failure(f"微信联系人读取失败: {exc}")
+        data = [{"name": c.get("display_name") or c.get("nickname") or c.get("remark") or "", "nickname": c.get("nickname") or "", "remark": c.get("remark") or "", "is_group": bool((c.get("username") or "").endswith("@chatroom"))} for c in contacts]
+        return ToolResult.success({"contacts": data, "returned": len(data), "total": total, "limit": limit}, summary=f"已读取 {len(data)}/{total} 个联系人")
+
+
+class WechatConversationDigestTool(Tool):
+    name = "wechat_conversation_digest"
+    # include_voice=true may load the local STT model and process hundreds of items.
+    timeout_s = 300.0
+    max_result_chars = 30000
+    description = (
+        "读取并分析指定微信联系人或群聊。detail=stats 只返回统计；用户明确要求查看全文、总结对话时，"
+        "必须使用 detail=full。include_voice=true 会自动读取并转写语音，微信无需在线。长记录请继续使用 wechat_dataset_page。"
+    )
+    parameters = {"type": "object", "properties": {
+        "contact": {"type": "string", "description": "联系人昵称、备注或群名"},
+        "days": {"type": "integer", "default": 7},
+        "limit": {"type": "integer", "default": 500, "maximum": 5000},
+        "detail": {"type": "string", "enum": ["stats", "full"], "default": "stats"},
+        "include_voice": {"type": "boolean", "default": False},
+    }, "required": ["contact"]}
+
+    async def run(self, ctx: ToolContext, contact: str, days: int = 7, limit: int = 500, detail: str = "stats", include_voice: bool = False) -> ToolResult:
+        days = max(1, min(days, 3650)); limit = max(1, min(limit, 5000))
+        await _step(ctx, "wechat", "正在读取聊天记录", f"{contact}，最近 {days} 天")
+        def _do():
+            db = _db(ctx)
+            try:
+                info = db.resolve_contact(contact)
+                messages = _resolve_session_messages(db, info["username"])
+                cutoff = time.time() - days * 86400
+                return [m for m in messages if m.timestamp >= cutoff][-limit:], _self_wxid(db)
+            finally:
+                db.close()
+        try:
+            messages, self_wxid = await asyncio.to_thread(_do)
+        except Exception as exc:
+            return ToolResult.failure(f"微信聊天读取失败: {exc}")
+        stats = compute_statistics(_messages_to_records(messages, self_wxid), contact_name=contact)
+        data: dict[str, Any] = {"contact": contact, "days": days, "message_count": len(messages), "stats": stats, "source": "snapshot" if data_root_for(ctx.services.config) != (ctx.services.config.tools.wechat.data_root or "") else "database"}
+        if detail == "full":
+            data["messages"] = _format_messages(messages, self_wxid)
+        if include_voice:
+            voice_result = await WechatTranscribeVoiceTool().run(ctx, contact, days, min(limit, 500))
+            data["voice"] = voice_result.data if voice_result.ok else {"error": voice_result.error}
+        return ToolResult.success(data, summary=f"已读取 {len(messages)} 条消息（{detail}）")
+
+
+class WechatDatasetPageTool(Tool):
+    name = "wechat_dataset_page"
+    timeout_s = 60.0
+    max_result_chars = 12000
+    description = "对指定联系人聊天记录分页读取，每页约 6000 字符；用于长聊天的分段分析，dataset_id 由上一页返回。"
+    parameters = {"type": "object", "properties": {
+        "contact": {"type": "string"}, "days": {"type": "integer", "default": 30},
+        "page": {"type": "integer", "default": 1}, "page_size_chars": {"type": "integer", "default": 6000, "maximum": 9000},
+    }, "required": ["contact"]}
+
+    async def run(self, ctx: ToolContext, contact: str, days: int = 30, page: int = 1, page_size_chars: int = 6000) -> ToolResult:
+        page = max(1, page); page_size_chars = max(1000, min(page_size_chars, 9000))
+        def _do():
+            db = _db(ctx)
+            try:
+                info = db.resolve_contact(contact); msgs = _resolve_session_messages(db, info["username"])
+                cutoff = time.time() - max(1, days) * 86400
+                return _format_messages([m for m in msgs if m.timestamp >= cutoff], _self_wxid(db))
+            finally:
+                db.close()
+        try:
+            lines = await asyncio.to_thread(_do)
+        except Exception as exc:
+            return ToolResult.failure(f"微信聊天分页读取失败: {exc}")
+        pages: list[str] = []; current = ""
+        for line in lines:
+            if current and len(current) + len(line) + 1 > page_size_chars:
+                pages.append(current); current = ""
+            current += ("\n" if current else "") + line
+        if current or not pages: pages.append(current)
+        text = pages[page - 1] if page <= len(pages) else ""
+        return ToolResult.success({"dataset_id": f"wechat:{contact}:{days}", "page": page, "total_pages": len(pages), "message_count": len(lines), "content": text, "has_more": page < len(pages)}, summary=f"已读取第 {page}/{len(pages)} 页")
 
 
 class WechatGroupListTool(Tool):

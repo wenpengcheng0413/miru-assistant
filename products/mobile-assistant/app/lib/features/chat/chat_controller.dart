@@ -92,6 +92,7 @@ class ChatController extends ChangeNotifier {
   String partialText = ''; // 识别中的半透明字
   String miruText = ''; // 流式回答字幕
   String toolStatus = ''; // "正在读取群消息…"
+  String progressStatus = '';
   double lastCost = 0;
   final List<ConversationBrief> conversations = [];
   final List<PendingAttachment> pendingAttachments = [];
@@ -135,7 +136,7 @@ class ChatController extends ChangeNotifier {
       final reconnected = _everConnected;
       _everConnected = true;
       if (reconnected) {
-        lines.add(ChatLine('note', '已重新连接'));
+        lines.add(ChatLine('note', '已重新连接，正在同步任务状态'));
       }
       notifyListeners();
       _loadHistory();
@@ -355,6 +356,7 @@ class ChatController extends ChangeNotifier {
     partialText = '';
     miruText = '';
     toolStatus = '';
+    progressStatus = '';
     ws.updateTarget(url: config.wsUri, token: config.token, hello: config.hello);
     wsStatus = '正在打开历史会话…';
     notifyListeners();
@@ -477,6 +479,7 @@ class ChatController extends ChangeNotifier {
           _voiceAttachmentIdsInFlight.clear();
         }
         _addUserLine(e['text'] as String? ?? '');
+        progressStatus = '正在处理…';
         // 消息已进聊天记录：清掉预填文本（语音自动发送后输入框不留残留）
         if (pendingInput.isNotEmpty) {
           pendingInput = '';
@@ -485,6 +488,11 @@ class ChatController extends ChangeNotifier {
         notifyListeners();
       case 'llm_delta':
         miruText += e['text'] as String? ?? '';
+        progressStatus = '正在生成回复…';
+        phase = ChatPhase.thinking;
+        notifyListeners();
+      case 'progress':
+        progressStatus = e['text'] as String? ?? '正在处理…';
         phase = ChatPhase.thinking;
         notifyListeners();
       case 'sentence':
@@ -506,6 +514,7 @@ class ChatController extends ChangeNotifier {
         }
         lastCost = (e['cost_rmb'] as num?)?.toDouble() ?? 0;
         phase = ChatPhase.idle;
+        progressStatus = '';
         notifyListeners();
         loadConversations();
       case 'server_note':
@@ -514,6 +523,7 @@ class ChatController extends ChangeNotifier {
       case 'error':
         lines.add(ChatLine('note', '⚠️ ${e['message'] ?? e['code']}'));
         phase = ChatPhase.idle;
+        progressStatus = '';
         notifyListeners();
     }
   }
@@ -670,6 +680,7 @@ class ChatController extends ChangeNotifier {
     await player.interrupt();
     miruText = '';
     toolStatus = '';
+    progressStatus = '';
     phase = ChatPhase.idle;
     notifyListeners();
   }

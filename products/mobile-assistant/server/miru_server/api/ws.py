@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import dataclass
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -21,6 +22,17 @@ from .deps import check_token
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@dataclass
+class _ActiveRun:
+    ctx: SessionContext
+    task: asyncio.Task
+
+
+# 任务生命周期独立于某一条手机 WebSocket。服务器进程仍在时，切后台/回前台
+# 或短暂断网都不会取消 DeepSeek 请求；新连接会接管同一 ctx 的事件输出。
+_active_runs: dict[str, _ActiveRun] = {}
 
 
 async def _safe_send(websocket: WebSocket, payload: dict) -> None:
@@ -185,6 +197,12 @@ async def ws_session(websocket: WebSocket) -> None:
         send_json=lambda p: _safe_send(websocket, p),
         send_audio=websocket.send_bytes,
     )
+    active = _active_runs.get(ctx.conversation_id)
+    if active is not None and not active.task.done():
+        ctx = active.ctx
+        ctx.send_json = lambda p: _safe_send(websocket, p)
+        ctx.send_audio = websocket.send_bytes
+        logger.info("重新接管运行中的会话: %s", ctx.conversation_id)
     await _safe_send(websocket, events.hello_ok(
         ctx.conversation_id, persona_name, ctx.tts_format, ctx.tts_sample_rate
     ))
@@ -192,11 +210,22 @@ async def ws_session(websocket: WebSocket) -> None:
 
     pipeline = AgentPipeline(services)
     voice = VoiceSession(ctx, services.stt, websocket, cfg)
-    run_task: asyncio.Task | None = None
+    run_task: asyncio.Task | None = active.task if active is not None and not active.task.done() else None
+
+    if run_task is not None:
+        await _safe_send(websocket, events.progress("正在继续后台任务…"))
 
     def start_run(text: str, attachment_ids: list[str] | None = None) -> None:
         nonlocal run_task
         run_task = asyncio.create_task(pipeline.run(ctx, text, attachment_ids))
+        _active_runs[ctx.conversation_id] = _ActiveRun(ctx, run_task)
+
+        def _forget(done: asyncio.Task) -> None:
+            current = _active_runs.get(ctx.conversation_id)
+            if current is not None and current.task is done:
+                _active_runs.pop(ctx.conversation_id, None)
+
+        run_task.add_done_callback(_forget)
 
     async def on_final_text(text: str, attachment_ids: list[str]) -> None:
         # 静音/噪声幻觉兜底：纯标点或空白（如 "."、"。"）不当成输入
@@ -267,5 +296,6 @@ async def ws_session(websocket: WebSocket) -> None:
         pass
     finally:
         if run_task and not run_task.done():
-            run_task.cancel()
-        logger.info("会话结束: %s", ctx.conversation_id)
+            logger.info("连接断开，后台任务继续运行: %s", ctx.conversation_id)
+        else:
+            logger.info("会话结束: %s", ctx.conversation_id)

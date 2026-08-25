@@ -43,6 +43,11 @@ def llm_delta(text: str) -> dict:
     return event({"type": "llm_delta", "text": text})
 
 
+def progress(text: str, phase: str = "thinking") -> dict:
+    """可重放的运行状态；用于在模型暂时没有 token 时证明任务仍在运行。"""
+    return event({"type": "progress", "text": text, "phase": phase})
+
+
 def sentence(text: str, audio_format: str, sample_rate: int, channels: int = 1) -> dict:
     return event({
         "type": "sentence",

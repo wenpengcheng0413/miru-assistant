@@ -244,6 +244,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       ));
     }
+    if (c.phase == ChatPhase.thinking && c.miruText.isEmpty && c.toolStatus.isEmpty) {
+      parts.add(Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(
+          children: [
+            const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 8),
+            Text(c.progressStatus.isEmpty ? '正在处理…' : c.progressStatus,
+                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ],
+        ),
+      ));
+    }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: parts);
   }
 

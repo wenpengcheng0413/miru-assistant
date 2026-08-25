@@ -66,12 +66,15 @@ class AgentPipeline:
         sink = ctx
         ctx.turn_running = True
         await self.ensure_conversation(ctx)
+        heartbeat = asyncio.create_task(self._progress_heartbeat(ctx))
 
         # 预算检查（hard_block 时直接拒绝）
         note = await self._budget_note()
         if note:
             await self._send(ctx, "json", note)
             if note["type"] == "error":
+                heartbeat.cancel()
+                ctx.turn_running = False
                 return
 
         # 组装上下文（先读历史，再存本条用户消息，避免重复）
@@ -86,6 +89,7 @@ class AgentPipeline:
             )
         except (OSError, ValueError) as e:
             await self._send(ctx, "json", events.error("attachment_unavailable", str(e)))
+            heartbeat.cancel()
             ctx.turn_running = False
             return
         await self._send(ctx, "json", events.user_text(user_text))
@@ -154,6 +158,7 @@ class AgentPipeline:
                 # 执行工具并把结果回填
                 tool_msgs = []
                 for call in calls:
+                    await self._send(ctx, "json", events.progress(f"正在执行工具：{call.name}…", "tool"))
                     result = await self.services.tools.execute(
                         ToolContext(
                             services=self.services,
@@ -204,6 +209,7 @@ class AgentPipeline:
             raise
         finally:
             flusher.cancel()
+            heartbeat.cancel()
             ctx.turn_running = False
             # 后台记忆提取（不阻塞、不打扰取消）
             if cfg.memory.auto_extract and assistant_parts:
@@ -220,6 +226,16 @@ class AgentPipeline:
         else:
             if ctx.send_audio is not None:
                 await ctx.send_audio(payload)
+
+    async def _progress_heartbeat(self, ctx: SessionContext) -> None:
+        """LLM 首 token 可能很慢，定期刷新客户端状态，避免看起来像卡死。"""
+        try:
+            while True:
+                await asyncio.sleep(2.5)
+                if ctx.turn_running:
+                    await self._send(ctx, "json", events.progress("仍在处理，请稍候…"))
+        except asyncio.CancelledError:
+            pass
 
     async def _periodic_flush(self, splitter: SentenceSplitter, tts: TTSQueue | None, last_feed: list) -> None:
         """长句无标点兜底：距上次增量 1.2s 且缓冲 ≥ min_len 就出句。"""

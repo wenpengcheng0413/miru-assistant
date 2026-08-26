@@ -102,6 +102,7 @@ class LLMClient:
         tools: list[dict] | None = None,
         model: str | None = None,
         max_tokens: int | None = None,
+        tool_choice: str | dict | None = None,
     ) -> AsyncIterator[LLMEvent]:
         """流式对话。可能的事件：TextDelta* → (ToolCallsDone) → Done；失败时 StreamError。"""
         kwargs = {
@@ -114,6 +115,8 @@ class LLMClient:
         }
         if tools:
             kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
         # DeepSeek V4 uses type=enabled/disabled. The older enabled=false
         # form triggers a 400 and deleting it re-enables hidden reasoning.
         thinking_override = True

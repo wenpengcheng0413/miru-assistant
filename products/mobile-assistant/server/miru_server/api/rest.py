@@ -48,9 +48,11 @@ async def health(request: Request):
         "build_id": wechat.get("build_id", "dev"),
         "started_at": getattr(request.app.state, "started_at", None),
         "llm_model": s.config.llm.model,
+        "vision_model": s.config.llm.vision_model,
         "stt_engine": s.stt.name,
         "tts_provider": s.tts_provider.name if s.tts_provider else "none",
         "wechat_tools": any(n.startswith("wechat_") for n in s.tools.enabled_names),
+        "wechat_image_analysis": "wechat_image_analysis" in s.tools.enabled_names,
         "wechat": wechat,
         "version": __import__("miru_server").__version__,
     }

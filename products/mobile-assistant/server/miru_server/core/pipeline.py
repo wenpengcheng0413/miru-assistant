@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -176,6 +177,13 @@ class AgentPipeline:
         analysis_detail = (
             f"上下文约 {len(str(user_content)):,} 字符，回复上限 {response_max_tokens} tokens"
         )
+        # 微信图片消息在数据库里只有 [图片] 标记，必须强制走图片工具，不能让
+        # 文本工具根据上下文猜测。仅对没有当前上传附件的明确图片请求启用闸门。
+        force_image_tool = (
+            not attachments
+            and "wechat_image_analysis" in self.services.tools.enabled_names
+            and _looks_like_wechat_image_request(user_text)
+        )
 
         # TTS 队列（仅需要合成且 provider 可用时）
         tts: TTSQueue | None = None
@@ -218,12 +226,24 @@ class AgentPipeline:
                         schemas,
                         model=model_name,
                         max_tokens=response_max_tokens,
+                        tool_choice=(
+                            {"type": "function", "function": {"name": "wechat_image_analysis"}}
+                            if force_image_tool and _round_no == 0
+                            else None
+                        ),
                     )
                 except TypeError as e:
                     # 保持 FakeLLM/第三方适配器的旧接口兼容。
-                    if "max_tokens" not in str(e):
+                    if "max_tokens" not in str(e) and "tool_choice" not in str(e):
                         raise
-                    stream = self.services.llm.stream_chat(messages, schemas, model=model_name)
+                    try:
+                        stream = self.services.llm.stream_chat(
+                            messages, schemas, model=model_name, max_tokens=response_max_tokens
+                        )
+                    except TypeError as second:
+                        if "max_tokens" not in str(second):
+                            raise
+                        stream = self.services.llm.stream_chat(messages, schemas, model=model_name)
                 async for ev in stream:
                     if isinstance(ev, TextDelta):
                         await flush_steps()
@@ -645,3 +665,16 @@ class AgentPipeline:
 
 def new_conversation_id() -> str:
     return uuid.uuid4().hex
+
+
+_WECHAT_IMAGE_TERMS = re.compile(
+    r"(?:微信|聊天|对话|哥哥|krista|联系人|群聊).{0,30}(?:照片|图片|相片|截图|发的图|图里|图中|看图)"
+    r"|(?:照片|图片|相片|截图|发的图|图里|图中|看图).{0,30}(?:微信|聊天|对话|哥哥|krista|联系人|群聊)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_wechat_image_request(text: str) -> bool:
+    """识别明确的微信图片查看意图，避免模型退回只读文字的工具。"""
+    value = (text or "").strip()
+    return bool(_WECHAT_IMAGE_TERMS.search(value))

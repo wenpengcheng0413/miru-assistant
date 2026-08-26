@@ -679,7 +679,9 @@ class WechatImageAnalysisTool(Tool):
     timeout_s = 300.0
     max_result_chars = 30000
     description = (
-        "查看微信聊天中的照片具体内容。用户说‘看看我和某人的照片/图片里有什么/读一下这张图’时使用；"
+        "【图片请求必须使用】查看微信聊天中的照片具体内容。用户提到‘照片/图片/截图/图里有什么’，"
+        "尤其是‘我和哥哥、Krista发的照片’这类一个或多个联系人的请求时，禁止只调用文字聊天工具或根据上下文猜测；"
+        "请直接调用本工具（多个联系人用‘、’或逗号分隔）；"
         "先在本机从微信 .dat 文件提取并解密图片，再逐张发送给配置的 DeepSeek 视觉模型分析。"
         "图片原始文件不会回传手机或作为聊天全文，只有视觉描述返回。contact 可为联系人或群名。"
     )
@@ -694,6 +696,27 @@ class WechatImageAnalysisTool(Tool):
     }
 
     async def run(self, ctx: ToolContext, contact: str, days: int = 7, limit: int = 5) -> ToolResult:
+        # 支持“哥哥、Krista”这种自然表达，避免模型必须拆成多轮工具调用。
+        contacts = [p.strip() for p in re.split(r"\s*(?:、|,|，|和|及|以及|与)\s*", contact or "") if p.strip()]
+        if len(contacts) > 1:
+            results = [await self.run(ctx, item, days, limit) for item in contacts]
+            merged_items: list[dict] = []
+            errors: list[str] = []
+            for item, result in zip(contacts, results):
+                if result.ok and isinstance(result.data, dict):
+                    merged_items.extend(
+                        dict(entry, contact=item)
+                        for entry in result.data.get("items", [])
+                        if isinstance(entry, dict)
+                    )
+                elif result.error:
+                    errors.append(f"{item}：{result.error}")
+            return ToolResult.success(
+                {"contacts": contacts, "days": days, "items": merged_items,
+                 "image_count": len(merged_items), "analyzed": sum(bool(x.get("analyzed")) for x in merged_items),
+                 "warnings": errors},
+                summary=f"已分析 {len(contacts)} 个联系人共 {sum(bool(x.get('analyzed')) for x in merged_items)} 张图片",
+            )
         days = max(1, min(int(days), 365))
         limit = max(1, min(int(limit), 20))
         await _step(ctx, "wechat", "正在提取微信图片", f"{contact}，最近 {days} 天，最多 {limit} 张")

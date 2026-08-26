@@ -98,7 +98,7 @@ settings.yaml 里每个微信工具带 `llm_visibility` 档位：
 两段式（与 V2 一致 + 新增理解层）：
 
 1. **本地提取**（已有）：`ImageExtractor` 定位 `attach/` 下的 `.dat` → AES 解密（V2 磁盘派生密钥）→ 导出 jpg。
-2. **内容理解**（新增）：DeepSeek V4 Flash 是纯文本模型，**不能看图** → 抽象 `VisionProvider` 接口，默认接阿里 DashScope `qwen-vl` 系列（便宜、中文强，按图计费约几分钱/张），配置关闭则不启用。工具：
+2. **内容理解**：文字模型 `deepseek-v4-flash` 不负责看图；图片统一交给 DeepSeek 多模态模型 `deepseek-v4-flash-vision-exp`。工具 `wechat_image_analysis` 会在本机解密后通过 Chat Completions 发送图片，返回描述，不上传原始文件到手机。
    - `image_find_and_export(contact, date)` → 导出到本地目录，返回文件清单（**图片不出 PC**）
    - `image_describe(paths)` → 仅对用户明确要求的图调 VLM，返回每张图的一句话描述 + 总括（LLM 二次总结）
 

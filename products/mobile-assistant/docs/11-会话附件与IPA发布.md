@@ -6,6 +6,8 @@
 - 后端每天建立一个一致性 SQLite 快照到 `server/data/backups/`，默认保留 30 天。
 - 手机可拍照、选相册图片或选择 JPG/PNG/GIF/WebP、PDF、DOCX、XLSX/XLS、CSV、PPTX、TXT、Markdown。
 - 图片和文档预览使用 `deepseek-v4-flash-vision-exp`；日常文字、语音仍使用 `deepseek-v4-flash`。
+- 微信聊天里的 `[图片]` 不再只作为文字标记：当用户要求查看照片时，服务端会强制调用 `wechat_image_analysis`，
+  在电脑本地定位/解密原图，再逐张使用 DeepSeek Vision 描述；多个联系人（例如“哥哥、Krista”）会在同一轮合并分析。
 - 微信工具 `wechat_transcribe_voice` 在本机解码 SILK、使用本机 STT 转写并缓存，不上传原始语音。
 
 ## 服务器首次更新
@@ -25,6 +27,7 @@ llm:
 
 tools:
   enabled:
+    - wechat_image_analysis
     - wechat_transcribe_voice
 ```
 

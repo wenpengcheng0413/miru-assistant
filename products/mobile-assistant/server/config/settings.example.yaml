@@ -78,6 +78,8 @@ tools:
     # - wechat_transcribe_voice  # 本机解码并转写微信语音，首次可能加载 STT 模型
     # - wechat_group_list
     # - wechat_group_digest
+    # 图片请求会强制调用该工具：本机解密微信 .dat 后交给 DeepSeek Vision，绝不根据 [图片] 标记猜测
+    # - wechat_image_analysis
   wechat:
     llm_visibility: aggregates   # aggregates | samples | raw（见 ../docs/04-Tool与Skill系统.md）
     data_root: ""                # 空 = 复用现有 V2 的自动探测/配置

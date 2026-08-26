@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 def runtime_build_id() -> str:
     """返回可在手机端显示的服务构建标识，不读取或暴露敏感配置。"""
     configured = os.environ.get("MIRU_BUILD_ID", "").strip()
-    if configured:
+    # 早期启动脚本会遗留 dev 占位符。它无法帮助判断电脑端服务是否已重启到
+    # 最新代码，因此仓库运行时优先显示真实 Git 提交号。
+    if configured and configured.lower() != "dev":
         return configured
     try:
         root = Path(__file__).resolve().parents[4]

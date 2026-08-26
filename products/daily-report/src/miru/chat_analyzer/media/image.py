@@ -72,8 +72,8 @@ class ImageExtractor:
         定位某条图片消息对应的 .dat 文件候选。
 
         优先级:
-            1. 文件名 == md5（仅当 XML md5 与本地文件名一致时）
-            2. 同目录全部文件（调用方按时间最近挑选）
+            1. 文件名匹配 md5 的完整候选（包括 ``_h.dat`` 高清原图）
+            2. 同目录全部非缩略图文件（调用方再按时间与清晰度挑选）
 
         Returns:
             候选 .dat 文件路径列表（按修改时间降序）。
@@ -83,8 +83,9 @@ class ImageExtractor:
             return []
         candidates = [p for p in img_dir.glob("*.dat") if not p.name.endswith("_t.dat")]
         if md5:
-            exact = [p for p in candidates if p.stem == md5]
+            exact = [p for p in candidates if p.stem == md5 or p.stem.startswith(f"{md5}_")]
             if exact:
+                exact.sort(key=lambda p: (0 if p.stem.endswith("_h") else 1, -p.stat().st_size))
                 return exact
         # 按修改时间降序（近期文件优先）
         candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)

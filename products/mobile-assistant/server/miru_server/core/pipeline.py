@@ -26,7 +26,7 @@ from .llm import (
     tool_result_message,
 )
 from .splitter import SentenceSplitter
-from ..attachments import image_content_block
+from ..attachments import vision_image_blocks
 from ..db.models import Attachment, Conversation, Message, ToolCall, TurnTrace, utcnow
 from ..memory.extractor import MemoryExtractor
 from ..persona.builder import Persona
@@ -534,14 +534,14 @@ class AgentPipeline:
         blocks: list[dict] = [{"type": "text", "text": instruction}]
         remaining_document_chars = self.services.config.attachments.max_extracted_chars_per_turn
         for image in images:
-            blocks.append(image_content_block(image.local_path))
+            blocks.extend(vision_image_blocks(image.local_path))
         for document in documents:
             try:
                 previews = json.loads(document.preview_paths or "[]")
             except json.JSONDecodeError:
                 previews = []
             for preview in previews:
-                blocks.append(image_content_block(preview))
+                blocks.extend(vision_image_blocks(preview))
                 uses_vision = True
             if document.extracted_text.strip():
                 excerpt = document.extracted_text[:remaining_document_chars]

@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import shutil
 import sqlite3
+import subprocess
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -19,7 +21,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..base import Tool, ToolContext, ToolResult
-from ...attachments import image_content_block
+from ...attachments import image_metadata, vision_image_blocks
 from ...wechat_runtime import data_root_for, ensure_miru_import_path, runtime_diagnostics
 
 logger = logging.getLogger(__name__)
@@ -235,7 +237,52 @@ def _image_md5(raw: str) -> str:
     return match.group(1).lower() if match else ""
 
 
-def _export_image(extractor, wxid: str, message, export_dir: Path, used: set[Path]) -> tuple[Path | None, str]:
+def _image_source_label(path: Path) -> str:
+    stem = path.stem.lower()
+    if stem.endswith("_h"):
+        return "高清原图"
+    if stem.endswith("_t"):
+        return "缩略图"
+    return "原图"
+
+
+def _image_candidate_key(path: Path, message_timestamp: float) -> tuple[int, int, float, int]:
+    """同一微信图片的 _h / 普通 / _t 文件按清晰度排序；时间只负责防串图。"""
+    try:
+        time_delta = abs(path.stat().st_mtime - message_timestamp)
+        size = path.stat().st_size
+    except OSError:
+        return 10**18, 3, 10**18, 0
+    tier = {"高清原图": 0, "原图": 1, "缩略图": 2}[_image_source_label(path)]
+    # 同一图片的多个派生文件通常在数秒内一同落盘；在这个窗口里必须先选
+    # 高清版本，不能让毫秒级 mtime 差异把普通图或缩略图排到前面。
+    return int(time_delta // 300), tier, time_delta, -size
+
+
+def _decode_wxgf_to_jpeg(data: bytes) -> bytes | None:
+    """把微信 WXGF 私有 HEVC 原图在本机转为 JPEG，不将图片发送到第三方。"""
+    start = data.find(b"\x00\x00\x00\x01")
+    if start < 0 or not shutil.which("ffmpeg"):
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-f", "hevc", "-i", "-", "-frames:v", "1",
+                "-f", "image2pipe", "-vcodec", "mjpeg", "-",
+            ],
+            input=data[start:], capture_output=True, timeout=45, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    jpeg = result.stdout
+    return jpeg if result.returncode == 0 and jpeg.startswith(b"\xff\xd8\xff") else None
+
+
+def _export_image(
+    extractor, wxid: str, message, export_dir: Path, used: set[Path],
+    wxgf_decoder=_decode_wxgf_to_jpeg,
+) -> tuple[Path | None, str, dict]:
     """提取一条图片消息，优先使用完整原图，不能解码时才回退缩略图。"""
     md5 = _image_md5(getattr(message, "raw_content", "")) or _image_md5(getattr(message, "content", ""))
     # _t.dat 是微信为列表预览生成的低分辨率缩略图。此前它排在原图前面，
@@ -243,9 +290,9 @@ def _export_image(extractor, wxid: str, message, export_dir: Path, used: set[Pat
     candidates = extractor.locate_files(wxid, message.timestamp, md5)
     candidates += [p for p in extractor.locate_thumb(wxid, message.timestamp, md5) if p not in candidates]
     if not candidates:
-        return None, "未找到对应的微信图片文件"
-    # 同一会话可能有多条图片，优先挑离消息时间最近且尚未使用的文件。
-    ordered = sorted(candidates, key=lambda p: abs(p.stat().st_mtime - message.timestamp) if p.exists() else 10**18)
+        return None, "未找到对应的微信图片文件", {}
+    # 在相同时间候选中，高清原图 _h.dat 优先于普通图，再优先于缩略图 _t.dat。
+    ordered = sorted(candidates, key=lambda p: _image_candidate_key(p, message.timestamp))
     ordered += [p for p in candidates if p not in ordered]
     for dat_path in ordered:
         if dat_path in used:
@@ -254,6 +301,14 @@ def _export_image(extractor, wxid: str, message, export_dir: Path, used: set[Pat
         if not data:
             continue
         ext = extractor.sniff_format(data)
+        source = _image_source_label(dat_path)
+        if ext == "wxgf":
+            jpeg = wxgf_decoder(data)
+            if not jpeg:
+                continue
+            data = jpeg
+            ext = "jpg"
+            source = f"{source}（WXGF 原图本机解码）"
         if ext not in {"jpg", "png", "gif", "webp", "bmp"}:
             continue
         stem = f"wechat_{int(message.timestamp)}_{int(getattr(message, 'server_id', 0) or 0)}"
@@ -261,8 +316,11 @@ def _export_image(extractor, wxid: str, message, export_dir: Path, used: set[Pat
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data)
         used.add(dat_path)
-        return out, ""
-    return None, "图片已找到但解密后格式不可供视觉模型读取"
+        metadata = image_metadata(out)
+        metadata["source"] = source
+        metadata["source_size_bytes"] = dat_path.stat().st_size
+        return out, "", metadata
+    return None, "图片已找到但解密后格式不可供视觉模型读取", {}
 
 
 class WechatContactListTool(Tool):
@@ -743,7 +801,7 @@ class WechatImageAnalysisTool(Tool):
                 warnings: list[str] = []
                 self_wxid = _self_wxid(db)
                 for message in messages:
-                    path, warning = _export_image(extractor, info["username"], message, export_dir, used)
+                    path, warning, image_info = _export_image(extractor, info["username"], message, export_dir, used)
                     sender = "我" if (message.sender == "我" or (self_wxid and message.sender_username == self_wxid)) else (message.sender or "对方")
                     row = {
                         "time": datetime.fromtimestamp(message.timestamp, _WECHAT_TZ).strftime("%Y-%m-%d %H:%M"),
@@ -752,7 +810,10 @@ class WechatImageAnalysisTool(Tool):
                     }
                     if path:
                         row["_path"] = path
+                        row["image"] = image_info
                         paths.append(path)
+                        if image_info.get("source") == "缩略图":
+                            warnings.append(f"{row['time']}：本机只找到缩略图（{image_info.get('width') or '?'}×{image_info.get('height') or '?'}），细节可能无法识别")
                     else:
                         row["error"] = warning or "图片提取失败"
                         warnings.append(f"{row['time']}：{row['error']}")
@@ -774,13 +835,16 @@ class WechatImageAnalysisTool(Tool):
         await _step(ctx, "vision", f"正在分析 {len(paths)} 张图片", "图片仅发送给配置的视觉模型")
         for row, path in zip((r for r in data["items"] if r.get("_path")), paths):
             try:
-                block = image_content_block(path)
+                image_info = row.get("image") or {}
+                width = image_info.get("width") or "未知"
+                height = image_info.get("height") or "未知"
                 prompt = (
-                    "请用中文客观描述这张微信图片的具体内容。优先说明人物/物体、文字、场景和可确认的细节；"
-                    "看不清或无法确认的内容请明确说看不清，不要猜测。控制在 200 字以内。"
+                    f"请用中文客观描述这张微信图片的具体内容。当前输入为{image_info.get('source', '图片')}，"
+                    f"实际像素为 {width}×{height}。先看全图，再结合附带的高清局部逐项读取人物/物体、文字、场景和可确认细节；"
+                    "对于文字请尽量准确转写。只有在图中确实没有足够像素时才说明看不清，绝不猜测。控制在 300 字以内。"
                 )
                 row["description"] = await ctx.services.llm.vision_chat(
-                    [{"role": "user", "content": [{"type": "text", "text": prompt}, block]}],
+                    [{"role": "user", "content": [{"type": "text", "text": prompt}, *vision_image_blocks(path)]}],
                     model=ctx.services.config.llm.vision_model,
                     max_tokens=500,
                 )

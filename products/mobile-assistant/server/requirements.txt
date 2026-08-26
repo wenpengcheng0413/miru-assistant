@@ -9,6 +9,7 @@ loguru>=0.7
 pydantic>=2
 pyyaml>=6
 python-multipart>=0.0.9
+Pillow>=10
 zeroconf>=0.150,<0.151
 
 # 文档 / 表格解析（启用手机文件分析时安装）

@@ -76,9 +76,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _pickImage(ImageSource source) async {
-    // 不传 imageQuality，image_picker 会保留相册/相机返回的原始文件；
-    // 视觉分析由服务端以 detail: original 发送给模型，不能在上传前压缩。
-    final image = await _imagePicker.pickImage(source: source);
+    // 保持原始像素尺寸并使用插件支持的最高质量。传入 100 还会将 iPhone
+    // 的 HEIC 照片转换成视觉接口可读取的 JPEG，而不降低图片清晰度。
+    final image = await _imagePicker.pickImage(source: source, imageQuality: 100);
     if (image != null) await c.uploadAttachment(image.path, filename: image.name);
   }
 

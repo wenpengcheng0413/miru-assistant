@@ -236,10 +236,12 @@ def _image_md5(raw: str) -> str:
 
 
 def _export_image(extractor, wxid: str, message, export_dir: Path, used: set[Path]) -> tuple[Path | None, str]:
-    """提取一条图片消息，优先使用可供视觉模型读取的缩略图。"""
+    """提取一条图片消息，优先使用完整原图，不能解码时才回退缩略图。"""
     md5 = _image_md5(getattr(message, "raw_content", "")) or _image_md5(getattr(message, "content", ""))
-    candidates = extractor.locate_thumb(wxid, message.timestamp, md5)
-    candidates += [p for p in extractor.locate_files(wxid, message.timestamp, md5) if p not in candidates]
+    # _t.dat 是微信为列表预览生成的低分辨率缩略图。此前它排在原图前面，
+    # 会让视觉模型即使使用 detail=original 也只能看到模糊版本。
+    candidates = extractor.locate_files(wxid, message.timestamp, md5)
+    candidates += [p for p in extractor.locate_thumb(wxid, message.timestamp, md5) if p not in candidates]
     if not candidates:
         return None, "未找到对应的微信图片文件"
     # 同一会话可能有多条图片，优先挑离消息时间最近且尚未使用的文件。

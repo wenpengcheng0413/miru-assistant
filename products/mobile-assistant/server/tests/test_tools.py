@@ -82,6 +82,40 @@ def test_clean_wechat_content():
     assert len(_clean_content("长" * 600)) <= 501
 
 
+def test_wechat_image_export_prefers_full_image_over_thumbnail(tmp_path):
+    """视觉分析必须先尝试完整原图，缩略图只可作为兼容性回退。"""
+    from miru_server.tools.builtin.wechat import _export_image
+
+    full = tmp_path / "full.dat"
+    thumb = tmp_path / "full_t.dat"
+    full.write_bytes(b"full")
+    thumb.write_bytes(b"thumb")
+
+    class FakeExtractor:
+        def locate_files(self, *_args):
+            return [full]
+
+        def locate_thumb(self, *_args):
+            return [thumb]
+
+        def decrypt(self, path):
+            return b"\xff\xd8\xfffull" if path == full else b"\xff\xd8\xffthumb"
+
+        def sniff_format(self, _data):
+            return "jpg"
+
+    class FakeMessage:
+        timestamp = 1
+        server_id = 2
+        raw_content = ""
+        content = ""
+
+    output, error = _export_image(FakeExtractor(), "wxid", FakeMessage(), tmp_path / "export", set())
+    assert error == ""
+    assert output is not None
+    assert output.read_bytes() == b"\xff\xd8\xfffull"
+
+
 def test_recent_activity_tool_is_enabled_when_wechat_is_configured(app_config):
     app_config.tools.enabled.append("wechat_contact_list")
     registry = build_registry(app_config)

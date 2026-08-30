@@ -5,6 +5,8 @@
   "git": {
     "branch": "master",
     "head_before_phase5_commit": "194b8442608b3cc516d0a3ddf8118a0695cc0f44",
+    "phase5_implementation_commit": "a6a4545f62393e397e2dd8d519c201e72cd64615",
+    "push_state": "pending_codemagic_configuration",
     "dirty_worktree_preserved": true
   },
   "production": {
@@ -47,6 +49,10 @@
     "9": "pending",
     "10": "pending"
   },
-  "next_action": "publish the scoped Phase 5 mobile commit, run Codemagic on macOS, then perform the mandatory iPhone and PC-off acceptance",
+  "human_gate": {
+    "reason": "Codemagic requires the account owner to authenticate before the non-secret MIRU_BASE_URL build variable can be verified or configured",
+    "safe_state": "production healthy; implementation committed locally; nothing pushed"
+  },
+  "next_action": "after Codemagic login, verify the non-secret MIRU_BASE_URL variable, push the scoped commit, build the IPA, then perform the mandatory iPhone and PC-off acceptance",
   "evidence_root": "docs/evidence/phase5/p5-20260830-1747-194b844-2a26ad6c"
 }

@@ -1,0 +1,58 @@
+Miru Phase 5 legacy long-term-memory migration
+==============================================
+
+Completed: 2026-08-31T00:49:41+08:00
+Release: p5-20260830-1747-194b844-2a26ad6c
+
+Authorization:
+- explicit user authorization received for a 90-row memory-only transfer
+- conflict policy: preserve the newer Cloud value
+
+Source package:
+- only memory_profile, memory_preferences, memory_projects,
+  memory_knowledge, and memory_episodes
+- no conversations, messages, attachments, API cost records, or other tables
+- rows: 90
+- integrity: ok
+- SHA-256: 4217e62e13514e0b97ce2e196a1edb10de7348390d3343b846aff645b53fa11a
+
+Pre-merge Cloud state:
+- profile: 2
+- preferences: 0
+- projects: 0
+- knowledge: 0
+- episodes: 0
+- integrity: ok
+
+Merge result:
+- inserted: 89
+- differing conflicts skipped because the Cloud value was newer: 1
+- Cloud-only profile rows preserved: 1
+- pre-existing Cloud profile row hashes unchanged: true
+- transaction committed: true
+
+Post-merge Cloud state:
+- profile: 20
+- preferences: 8
+- projects: 20
+- knowledge: 43
+- episodes: 0
+- integrity: ok
+- production database owner: 10001:10001
+- API health: healthy
+- /healthz: HTTP 200
+- /readyz: HTTP 200
+- real Tailnet HTTPS memory-list verification: passed
+
+Rollback:
+- secured pre-merge production database backup retained
+- backup SHA-256:
+  8f31fc9354e205550392e549d4d2d3140cbf5e95cdb8ce5f8620835393267c69
+
+Cleanup:
+- remote temporary memory package removed
+- local temporary memory package removed
+- no memory contents were written to this evidence file
+
+Physical iPhone memory-panel confirmation (user-confirmed): PASS
+Phase 5 final result: PASS

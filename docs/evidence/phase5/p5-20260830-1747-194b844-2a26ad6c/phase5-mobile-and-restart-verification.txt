@@ -1,0 +1,47 @@
+Miru Phase 5 physical mobile and Cloud restart verification
+============================================================
+
+Updated: 2026-08-31T00:41:54+08:00
+Release: p5-20260830-1747-194b844-2a26ad6c
+
+Physical iPhone initial acceptance (user-confirmed): PASS
+- Miru 0.3.0+3 installed
+- 5G/Tailscale connection
+- correct Token accepted
+- incorrect Token rejected
+- chat response
+- background/reopen conversation persistence
+
+Controlled Cloud restart and automatic checks: PASS
+- miru-api health: healthy
+- caddy health: healthy
+- loopback /healthz: HTTP 200
+- loopback /readyz: HTTP 200
+- SQLite schema: 2
+- SQLite integrity: ok
+
+Real Tailnet HTTPS checks from Windows: PASS
+- Cloud peer online
+- unauthenticated /api/status: HTTP 401
+- authenticated /api/status: HTTP 200
+- Cloud state: ready
+- Home Node state: not_configured
+
+Physical iPhone post-restart recovery (user-confirmed): PASS
+- pre-restart conversation history remained available
+- post-restart message completed with streaming response
+
+Physical PC-off Cloud-only acceptance (user-confirmed): PASS
+
+Post-acceptance data-continuity issue:
+- legacy local long-term memory was not migrated to the fresh Cloud database
+- local source integrity: ok, schema: 2
+- local memory rows: profile 19, preferences 8, projects 20, knowledge 43
+- Cloud memory rows before migration: profile 2, all other memory scopes 0
+- conflict analysis: 89 additive rows, 1 differing profile-key collision,
+  1 Cloud-only profile row
+- conflict policy candidate: retain the newer Cloud auto value; the older local
+  value remains recoverable from the immutable local backup
+
+Remaining gate:
+- explicit authorization and completion of the private memory-only migration

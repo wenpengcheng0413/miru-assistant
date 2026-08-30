@@ -17,7 +17,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import rest, ws
+from .api import node_ws, rest, ws
 from .config import AppConfig
 from .db.backup import backup_database
 from .discovery import LanServiceAdvertiser
@@ -143,6 +143,7 @@ def create_app(config: AppConfig) -> FastAPI:
         allow_headers=cors_headers,
     )
     app.include_router(ws.router)
+    app.include_router(node_ws.router)
     app.include_router(rest.public_router)
     app.include_router(rest.router)
 

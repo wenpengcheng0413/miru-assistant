@@ -106,3 +106,12 @@ attachments:
   max_images_per_turn: 10
   max_preview_pages: 10
   max_extracted_chars_per_turn: 80000  # 文档正文进入单轮模型上下文的总字符上限
+
+home_node:
+  enabled: false
+  node_id: node-home
+  token: "${MIRU_HOME_NODE_TOKEN}"  # 与 App Token 独立；Windows 使用 DPAPI 保存
+  allowed_capabilities: []           # Phase 7 起逐项启用
+  heartbeat_interval_s: 20
+  stale_after_s: 30
+  offline_after_s: 60

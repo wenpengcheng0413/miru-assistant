@@ -12,6 +12,7 @@ from .cost.pricing import Pricing
 from .cost.tracker import CostTracker
 from .db.database import init_db
 from .memory.store import MemoryStore
+from .node_registry import HomeNodeRegistry
 from .persona.builder import PersonaManager
 from .stt.base import NoneSTT, STTEngine, STTUnavailable, create_stt
 from .tools.registry import ToolRegistry, build_registry
@@ -51,6 +52,7 @@ class Services:
     stt: STTEngine
     tts_provider: TTSProvider | None
     tts_fallback: TTSProvider | None
+    home_node: HomeNodeRegistry
 
 
 def create_services(config: AppConfig) -> Services:
@@ -102,4 +104,5 @@ def create_services(config: AppConfig) -> Services:
         stt=stt,
         tts_provider=tts_provider,
         tts_fallback=tts_fallback,
+        home_node=HomeNodeRegistry(config.home_node),
     )

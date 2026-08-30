@@ -140,6 +140,30 @@ class AttachmentConfig(BaseModel):
     max_extracted_chars_per_turn: int = Field(default=80_000, ge=10_000, le=200_000)
 
 
+class HomeNodeConfig(BaseModel):
+    """Cloud-side identity and liveness policy for the outbound Home Node."""
+
+    enabled: bool = False
+    node_id: str = "node-home"
+    token: str = ""
+    allowed_capabilities: list[str] = Field(default_factory=list)
+    heartbeat_interval_s: int = Field(default=20, ge=5, le=60)
+    stale_after_s: int = Field(default=30, ge=10, le=180)
+    offline_after_s: int = Field(default=60, ge=20, le=300)
+
+    def model_post_init(self, __context: object) -> None:
+        if self.offline_after_s <= self.stale_after_s:
+            raise ValueError("home_node.offline_after_s must exceed stale_after_s")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", self.node_id):
+            raise ValueError("home_node.node_id is invalid")
+        clean: list[str] = []
+        for item in self.allowed_capabilities:
+            value = item.strip()
+            if value and len(value) <= 64 and re.fullmatch(r"[a-z0-9_.-]+", value):
+                clean.append(value)
+        self.allowed_capabilities = sorted(set(clean))
+
+
 class AppConfig(BaseModel):
     # development keeps the current Windows behavior; cloud is deliberately
     # dependency-light and never initializes Home Node/WeChat/local STT.
@@ -155,6 +179,7 @@ class AppConfig(BaseModel):
     db: DBConfig = Field(default_factory=DBConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
     attachments: AttachmentConfig = Field(default_factory=AttachmentConfig)
+    home_node: HomeNodeConfig = Field(default_factory=HomeNodeConfig)
 
     # 配置文件目录用于加载 pricing.yaml；运行路径统一按项目目录解析。
     config_dir: Path = Path("config")
@@ -181,6 +206,10 @@ class AppConfig(BaseModel):
             self.tools.enabled = [
                 name for name in self.tools.enabled if not name.startswith("wechat_")
             ]
+            if self.home_node.enabled and len(self.home_node.token) < 32:
+                raise ValueError(
+                    "MIRU_HOME_NODE_TOKEN (at least 32 characters) is required when Home Node is enabled"
+                )
 
     @property
     def is_cloud(self) -> bool:

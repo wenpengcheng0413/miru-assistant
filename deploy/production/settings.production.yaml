@@ -60,3 +60,12 @@ attachments:
   max_images_per_turn: 4
   max_preview_pages: 4
   max_extracted_chars_per_turn: 20000
+
+home_node:
+  enabled: true
+  node_id: node-home
+  token: "${MIRU_HOME_NODE_TOKEN}"
+  allowed_capabilities: []
+  heartbeat_interval_s: 20
+  stale_after_s: 30
+  offline_after_s: 60

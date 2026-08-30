@@ -80,6 +80,16 @@ def build_safe_status(services) -> dict:
     cloud_tools = services.tools.enabled_names
     voice_available = services.tts_provider is not None
     voice_reason = "" if voice_available else "provider_not_configured"
+    node = services.home_node.snapshot()
+    node_online = node.state == "online"
+    node_capabilities = set(node.capabilities)
+    wechat_available = node_online and any(
+        item.startswith("wechat.") for item in node_capabilities
+    )
+    gpu_available = node_online and any(
+        item.startswith("gpu.") for item in node_capabilities
+    )
+    node_reason = f"node_{node.state}" if not node_online else "capability_not_registered"
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -88,7 +98,7 @@ def build_safe_status(services) -> dict:
             "profile": cfg.profile,
             "version": __import__("miru_server").__version__,
         },
-        "home_node": {"state": "not_configured", "reason": "phase1_not_implemented"},
+        "home_node": node.public_dict(),
         "capabilities": {
             "chat": "available" if cfg.llm.api_key else "unavailable",
             "streaming": "available" if cfg.llm.api_key else "unavailable",
@@ -101,10 +111,10 @@ def build_safe_status(services) -> dict:
             "stt": "available" if services.stt.name != "none" else "unavailable",
             "tts": "available" if voice_available else "unavailable",
             "voice_reason": voice_reason,
-            "wechat": "unavailable",
-            "wechat_reason": "node_not_configured",
-            "gpu": "unavailable",
-            "gpu_reason": "node_not_configured",
+            "wechat": "available" if wechat_available else "unavailable",
+            "wechat_reason": "" if wechat_available else node_reason,
+            "gpu": "available" if gpu_available else "unavailable",
+            "gpu_reason": "" if gpu_available else node_reason,
         },
     }
 
@@ -119,10 +129,14 @@ async def health(request: Request):
     s = _svc(request)
     # Kept as a compatibility endpoint for existing clients. It is now
     # bounded and does not run WeChat diagnostics or expose local paths.
+    node = s.home_node.snapshot()
+    wechat_available = node.state == "online" and any(
+        item.startswith("wechat.") for item in node.capabilities
+    )
     wechat = {
-        "available": False,
-        "error_code": "node_not_configured",
-        "reason": "Home Node is not configured",
+        "available": wechat_available,
+        "error_code": "" if wechat_available else f"node_{node.state}",
+        "reason": "" if wechat_available else "Home Node capability is unavailable",
     }
     return {
         "status": "ok",

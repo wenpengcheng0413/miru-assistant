@@ -276,7 +276,11 @@ async def ws_session(websocket: WebSocket) -> None:
 
     try:
         while True:
-            frame = await websocket.receive()
+            try:
+                frame = await asyncio.wait_for(websocket.receive(), timeout=20)
+            except asyncio.TimeoutError:
+                await _safe_send(websocket, events.system_status(build_safe_status(services)))
+                continue
             if frame["type"] == "websocket.disconnect":
                 break
             if frame.get("bytes") is not None:

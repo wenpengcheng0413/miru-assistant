@@ -1,0 +1,38 @@
+Miru IPA offline audit
+======================
+
+Build: Codemagic #58 (passed)
+Artifact: Miru.ipa
+Version: 0.3.0+3
+Bundle ID: com.miru.miruApp
+Size: 11731450 bytes
+SHA-256: 8805CCBEE0FDDDC52B35F1DE4556926EA5B4A36A8FF8E5EEC230105CB72893F0
+
+Archive integrity: PASS
+Unsafe archive paths: none
+Runner executable: present
+Microphone permission description: present
+Camera permission description: present
+Photo-library permission description: present
+Injected endpoint scheme: HTTPS
+
+Active Runner Info.plist policy:
+- NSLocalNetworkUsageDescription: absent
+- NSBonjourServices: absent
+- NSAppTransportSecurity: absent
+- NSAllowsArbitraryLoads: absent
+- NSAllowsLocalNetworking: absent
+
+Forbidden marker scan:
+- MIRU_SERVER_TOKEN: absent
+- Authorization: Bearer: absent
+- dev-token-change-me: absent
+- MIRU_DEEPSEEK_API_KEY: absent
+- MINIMAX_API_KEY: absent
+
+Raw-string clarification:
+The stock Flutter.framework binary contains the generic string
+NSAllowsArbitraryLoads. It is not present as a key in any parsed plist and does
+not activate an App Transport Security exception for Runner.
+
+Overall result: PASS

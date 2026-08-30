@@ -31,6 +31,7 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [project.scripts]
 miru-server = "miru_server.main:run"
+miru-home-node = "miru_node.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -38,4 +39,4 @@ asyncio_mode = "auto"
 addopts = "-v --tb=short"
 
 [tool.setuptools.packages.find]
-include = ["miru_server*"]
+include = ["miru_server*", "miru_node*"]

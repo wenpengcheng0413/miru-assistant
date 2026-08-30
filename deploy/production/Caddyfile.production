@@ -3,7 +3,7 @@
 }
 
 :8080 {
-    @later_phase_paths path /api/wechat/* /api/debug/* /ws/node*
+    @later_phase_paths path /api/wechat/* /api/debug/*
     respond @later_phase_paths 404
 
     request_body {

@@ -6,7 +6,7 @@
     "branch": "master",
     "head_before_phase5_commit": "194b8442608b3cc516d0a3ddf8118a0695cc0f44",
     "phase5_implementation_commit": "a6a4545f62393e397e2dd8d519c201e72cd64615",
-    "push_state": "blocked_github_cli_reauthentication",
+    "push_state": "pushed_to_origin_master",
     "dirty_worktree_preserved": true
   },
   "production": {
@@ -49,10 +49,15 @@
     "9": "pending",
     "10": "pending"
   },
-  "human_gate": {
-    "reason": "the saved GitHub CLI credential has expired and the account owner must approve a new OAuth login before the audited commits can be pushed",
-    "safe_state": "production healthy; Codemagic MIRU_BASE_URL configured; implementation committed locally; nothing pushed"
+  "ci": {
+    "provider": "codemagic",
+    "workflow": "Miru iOS Sideload IPA Build",
+    "environment_group": "miru-production",
+    "base_url_configured": true,
+    "app_token_in_ci": false,
+    "github_webhook": "active"
   },
-  "next_action": "after GitHub CLI reauthentication, push the scoped commits, track the Codemagic IPA build, then perform the mandatory iPhone and PC-off acceptance",
+  "human_gate": null,
+  "next_action": "track the Codemagic IPA build, then perform the mandatory iPhone and PC-off acceptance",
   "evidence_root": "docs/evidence/phase5/p5-20260830-1747-194b844-2a26ad6c"
 }

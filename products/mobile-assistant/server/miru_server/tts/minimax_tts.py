@@ -83,4 +83,7 @@ class MiniMaxTTS:
                 if audio_hex:
                     yield bytes.fromhex(audio_hex)
             except (json.JSONDecodeError, ValueError) as e:
-                logger.debug("无法解析 SSE 行: %s (%s)", line[:80], e)
+                logger.debug(
+                    "无法解析 SSE 行: exception_type=%s error_code=invalid_sse",
+                    type(e).__name__,
+                )

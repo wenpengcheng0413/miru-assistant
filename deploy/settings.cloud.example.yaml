@@ -1,0 +1,62 @@
+# Synthetic Phase 2 cloud configuration. Never use as a production secret
+# file; credentials are supplied only as environment references by Compose.
+profile: cloud
+
+server:
+  host: 0.0.0.0
+  port: 8765
+  token: "${MIRU_SERVER_TOKEN}"
+  advertise_lan: false
+  cors_origins: []
+
+llm:
+  # Compose's benchmark profile points this at the local mock-llm service.
+  base_url: "${MIRU_LLM_BASE_URL}"
+  api_key: "${MIRU_DEEPSEEK_API_KEY}"
+  model: phase2-mock
+  vision_model: phase2-mock-vision
+  thinking: false
+  temperature: 0.0
+  max_tokens: 2048
+  short_max_tokens: 256
+  timeout_s: 10
+  max_tool_rounds: 2
+
+stt:
+  engine: none
+
+tts:
+  provider: none
+
+memory:
+  auto_extract: false
+
+persona:
+  default: miru
+  dir: ./config/persona
+
+tools:
+  enabled:
+    - get_current_time
+    - memory_set
+    - memory_get
+    - memory_list
+    - memory_delete
+    - memory_search
+    - api_cost_report
+    - api_budget_set
+
+db:
+  path: ./data/miru_server.db
+
+backup:
+  enabled: false
+  dir: ./data/backups
+  retention_days: 7
+
+attachments:
+  dir: ./data/attachments
+  max_file_mb: 10
+  max_images_per_turn: 4
+  max_preview_pages: 4
+  max_extracted_chars_per_turn: 20000

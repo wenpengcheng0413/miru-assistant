@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../core/config.dart';
+import '../../core/deployment_profile.dart';
 import '../../core/server_discovery.dart';
+import '../../core/system_status.dart';
 
 /// 设置页：服务器配置 / 连接测试 / 成本 / 记忆（REST 管理面）。
 class SettingsScreen extends StatefulWidget {
@@ -21,16 +23,19 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _urlCtrl;
   late final TextEditingController _tokenCtrl;
+  late DeploymentProfile _profile;
   bool _saving = false;
   bool _discovering = false;
   bool _syncingWechat = false;
   String _testResult = '';
   String _wechatStatus = '';
 
-  Dio get _dio => Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 12),
-        receiveTimeout: const Duration(seconds: 12),
-      ));
+  Dio get _dio => Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 12),
+          receiveTimeout: const Duration(seconds: 12),
+        ),
+      );
 
   /// 去尾部斜杠：`http://x:8765/` → `http://x:8765`，避免拼出 //api/health
   String get _cleanUrl => _urlCtrl.text.trim().replaceAll(RegExp(r'/+$'), '');
@@ -44,6 +49,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _urlCtrl = TextEditingController(text: widget.config.baseUrl);
     _tokenCtrl = TextEditingController(text: widget.config.token);
+    _profile = widget.config.profile;
   }
 
   @override
@@ -60,11 +66,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          DropdownButtonFormField<DeploymentProfile>(
+            initialValue: _profile,
+            decoration: const InputDecoration(
+              labelText: '连接模式',
+              border: OutlineInputBorder(),
+            ),
+            items: DeploymentProfile.values
+                .map(
+                  (item) =>
+                      DropdownMenuItem(value: item, child: Text(item.label)),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() {
+                _profile = value;
+                _testResult = '';
+                _wechatStatus = '';
+              });
+            },
+          ),
+          const SizedBox(height: 12),
           TextField(
             controller: _urlCtrl,
-            decoration: const InputDecoration(
-              labelText: '后端地址',
-              hintText: 'http://192.168.1.100:8765 或 https://xxx.ts.net:8765',
+            decoration: InputDecoration(
+              labelText: _profile.isCloud ? 'Cloud 地址（HTTPS）' : '开发服务器地址',
+              hintText: _profile.isCloud
+                  ? 'https://设备名.tailnet.ts.net'
+                  : 'http://127.0.0.1:8765',
               border: OutlineInputBorder(),
             ),
             keyboardType: TextInputType.url,
@@ -99,20 +129,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
           const SizedBox(height: 4),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: _discovering ? null : _discoverComputer,
-              icon: _discovering
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.radar),
-              label: Text(_discovering ? '正在查找电脑…' : '自动查找这台电脑'),
+          if (_profile.allowsBonjour)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _discovering ? null : _discoverComputer,
+                icon: _discovering
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.radar),
+                label: Text(_discovering ? '正在查找电脑…' : '自动查找开发电脑'),
+              ),
             ),
-          ),
           if (_testResult.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -121,35 +152,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (_wechatStatus.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(_wechatStatus, style: const TextStyle(fontSize: 12)),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: _syncingWechat ? null : _syncWechat,
-                icon: _syncingWechat
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.sync),
-                label: Text(_syncingWechat ? '正在同步微信数据…' : '同步微信数据'),
+            if (_profile.allowsBonjour)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _syncingWechat ? null : _syncWechat,
+                  icon: _syncingWechat
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.sync),
+                  label: Text(_syncingWechat ? '正在同步微信数据…' : '同步微信数据'),
+                ),
               ),
-            ),
           ],
           const Divider(height: 32),
           SwitchListTile(
             title: const Text('语音回复'),
-            subtitle: Text(widget.config.ttsEnabled
-                ? 'Miru 会用语音回答'
-                : '只显示文字，不播放语音'),
+            subtitle: Text(
+              widget.config.ttsEnabled ? 'Miru 会用语音回答' : '只显示文字，不播放语音',
+            ),
             value: widget.config.ttsEnabled,
             onChanged: (v) => setState(() => widget.config.ttsEnabled = v),
           ),
           SwitchListTile(
             title: const Text('说完自动发送'),
-            subtitle: Text(widget.config.autoSend
-                ? '语音识别后直接发送'
-                : '识别文本留在输入框，可修改后再发送'),
+            subtitle: Text(
+              widget.config.autoSend ? '语音识别后直接发送' : '识别文本留在输入框，可修改后再发送',
+            ),
             value: widget.config.autoSend,
             onChanged: (v) => setState(() => widget.config.autoSend = v),
           ),
@@ -176,42 +208,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _save() async {
+    final error = _validateInput();
+    if (error != null) {
+      setState(() => _testResult = '❌ $error');
+      return;
+    }
     setState(() => _saving = true);
+    widget.config.profile = _profile;
     widget.config.baseUrl = _cleanUrl;
     widget.config.token = _tokenCtrl.text.trim();
     await widget.config.save();
     if (mounted) {
       setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已保存')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已保存')));
       Navigator.pop(context, true); // 通知聊天页配置已变更（含开关）
     }
   }
 
   Future<void> _testConnection() async {
     final cleanUrl = _cleanUrl;
-    final uri = Uri.tryParse(cleanUrl);
-    if (cleanUrl.isEmpty ||
-        uri == null ||
-        !(uri.scheme == 'http' || uri.scheme == 'https') ||
-        uri.host.isEmpty) {
-      setState(() => _testResult = '❌ 地址格式不对，应为 http://电脑IP:8765');
+    final validationError = _validateInput();
+    if (validationError != null) {
+      setState(() => _testResult = '❌ $validationError');
       return;
     }
 
     setState(() => _testResult = '测试中…');
     try {
       final resp = await _dio.get(
-        '$cleanUrl/api/health',
+        '$cleanUrl/api/status',
         options: Options(headers: _headers),
       );
       // REST 通了还要验证 WS 握手（聊天功能走 WS），防止只通一半
       await _probeWs(cleanUrl);
-      final health = Map<String, dynamic>.from(resp.data as Map);
+      final status = MiruSystemStatus.fromJson(resp.data as Map);
       setState(() {
-        _testResult = '✅ 连接成功（REST + WebSocket）';
-        _wechatStatus = _formatWechatStatus(health);
+        _testResult = _profile.isCloud
+            ? '✅ 连接成功（HTTPS REST + WSS）'
+            : '✅ 连接成功（REST + WebSocket）';
+        _wechatStatus = _formatSystemStatus(status);
       });
     } catch (e) {
       setState(() => _testResult = '❌ ${friendlyNetError(e)}');
@@ -219,6 +256,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _discoverComputer() async {
+    if (!_profile.allowsBonjour) {
+      setState(() => _testResult = '❌ 生产模式已禁用局域网自动发现');
+      return;
+    }
     setState(() {
       _discovering = true;
       _testResult = '正在局域网中查找 Miru…';
@@ -238,6 +279,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _testResult = '已找到 ${found.host}:${found.port}，正在验证连接…';
     });
     await _testConnection();
+  }
+
+  String? _validateInput() {
+    if (_tokenCtrl.text.trim().isEmpty) return '访问令牌不能为空';
+    final uri = Uri.tryParse(_cleanUrl);
+    if (_cleanUrl.isEmpty || uri == null || uri.host.isEmpty) {
+      return '请填写完整的服务器地址';
+    }
+    if (uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment) {
+      return '服务器地址不能包含账号、查询参数或片段';
+    }
+    if (_profile.isCloud && uri.scheme != 'https') {
+      return '生产模式只允许 HTTPS/WSS';
+    }
+    if (!_profile.isCloud && uri.scheme != 'http' && uri.scheme != 'https') {
+      return '服务器地址必须以 http:// 或 https:// 开头';
+    }
+    return null;
+  }
+
+  String _formatSystemStatus(MiruSystemStatus status) {
+    final unavailable = status.capabilities.entries
+        .where((entry) => !entry.value.available)
+        .map((entry) => entry.key)
+        .take(4)
+        .join('、');
+    return '${status.cloudLabel} · ${status.homeNodeLabel}'
+        '${unavailable.isEmpty ? '' : '\n暂不可用：$unavailable'}';
   }
 
   String _formatWechatStatus(Map<String, dynamic> health) {
@@ -275,7 +344,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _testResult = '✅ 微信离线快照同步完成';
       });
     } catch (e) {
-      if (mounted) setState(() => _testResult = '❌ 微信同步失败：${friendlyNetError(e)}');
+      if (mounted)
+        setState(() => _testResult = '❌ 微信同步失败：${friendlyNetError(e)}');
     } finally {
       if (mounted) setState(() => _syncingWechat = false);
     }
@@ -300,12 +370,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           return false;
         }
       }).timeout(const Duration(seconds: 8));
-      channel.sink.add(jsonEncode({
-        'type': 'hello',
-        'token': _tokenCtrl.text.trim(),
-        'device': 'iphone',
-        'mode': 'text',
-      }));
+      channel.sink.add(
+        jsonEncode({
+          'type': 'hello',
+          'token': _tokenCtrl.text.trim(),
+          'device': 'iphone',
+          'mode': 'text',
+        }),
+      );
       await helloOk;
     } finally {
       try {
@@ -320,8 +392,7 @@ String friendlyNetError(Object e) {
   if (e is DioException) {
     final cause = e.error;
     if (e.type == DioExceptionType.connectionTimeout) {
-      return '连接超时：① 电脑端 Miru 后端可能没启动 ② 手机与电脑不在同一 Wi-Fi'
-          ' ③ 电脑防火墙拦截了端口 8765';
+      return '连接超时：请检查手机网络、Tailscale 与 Cloud 服务状态';
     }
     if (e.type == DioExceptionType.receiveTimeout) {
       return '响应超时：服务器收到了请求但没有回应，后端可能卡住了';
@@ -329,19 +400,17 @@ String friendlyNetError(Object e) {
     if (e.type == DioExceptionType.badResponse) {
       final status = e.response?.statusCode ?? 0;
       if (status == 401 || status == 403) {
-        return '服务器拒绝了 token（HTTP $status）：请检查访问令牌是否与电脑端一致';
+        return '服务器拒绝了访问令牌（HTTP $status）：请重新输入 App Token';
       }
-      return '服务器返回错误（HTTP $status）：${e.response?.data}';
+      return 'Cloud 返回错误（HTTP $status）';
     }
     if (cause is SocketException) {
       final code = cause.osError?.errorCode ?? -1;
       if (code == 51 || cause.message.toLowerCase().contains('unreachable')) {
-        return '连不上局域网：① 手机与电脑连同一个 Wi-Fi ② iOS 已允许本地网络权限'
-            '（设置→隐私与安全性→本地网络，打开 LiveContainer / Miru）'
-            ' ③ 电脑防火墙放行 8765 端口';
+        return '网络不可达：请检查手机网络与 Tailscale 连接';
       }
       if (code == 61 || cause.message.toLowerCase().contains('refused')) {
-        return '连接被拒绝：后端没启动，或端口不是 8765。请到电脑上双击 products\\mobile-assistant\\server\\start_server.bat';
+        return '连接被拒绝：Cloud 服务暂不可达';
       }
       return '网络错误：${cause.message}';
     }
@@ -352,11 +421,11 @@ String friendlyNetError(Object e) {
   final text = e.toString();
   if (text.toLowerCase().contains('timed out') ||
       text.toLowerCase().contains('timeout')) {
-    return '连接超时：电脑端 Miru 后端可能未启动，或防火墙拦截了端口 8765';
+    return '连接超时：请检查手机网络、Tailscale 与 Cloud 服务状态';
   }
   if (text.toLowerCase().contains('connection refused') ||
       text.toLowerCase().contains('拒绝')) {
-    return '连接被拒绝：后端没启动，或端口不是 8765。请到电脑上双击 products\\mobile-assistant\\server\\start_server.bat';
+    return '连接被拒绝：Cloud 服务暂不可达';
   }
   return text;
 }
@@ -383,10 +452,12 @@ class _CostPanelState extends State<_CostPanel> {
 
   Future<void> _load() async {
     try {
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 8),
-        receiveTimeout: const Duration(seconds: 12),
-      ));
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 12),
+        ),
+      );
       final resp = await dio.get(
         '${widget.baseUrl}/api/cost/report?days=7',
         options: Options(headers: widget.headers),
@@ -439,10 +510,12 @@ class _MemoryPanelState extends State<_MemoryPanel> {
 
   Future<void> _load() async {
     try {
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 8),
-        receiveTimeout: const Duration(seconds: 12),
-      ));
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 12),
+        ),
+      );
       final resp = await dio.get(
         '${widget.baseUrl}/api/memory?scope=profile',
         options: Options(headers: widget.headers),

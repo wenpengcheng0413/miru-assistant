@@ -30,6 +30,7 @@ class ServerConfig(BaseModel):
     token: str = ""
     advertise_lan: bool = True
     service_name: str = "Miru"
+    cors_origins: list[str] = Field(default_factory=list)
 
 
 class LLMConfig(BaseModel):
@@ -140,6 +141,9 @@ class AttachmentConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
+    # development keeps the current Windows behavior; cloud is deliberately
+    # dependency-light and never initializes Home Node/WeChat/local STT.
+    profile: str = "development"
     server: ServerConfig = Field(default_factory=ServerConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
@@ -156,6 +160,32 @@ class AppConfig(BaseModel):
     config_dir: Path = Path("config")
     project_dir: Path = Path(".")
 
+    def model_post_init(self, __context: object) -> None:
+        profile = (self.profile or "development").strip().lower()
+        if profile not in {"development", "cloud", "node"}:
+            raise ValueError("profile must be development, cloud, or node")
+        self.profile = profile
+        if profile == "cloud":
+            # Cloud must not probe LAN/Bonjour, import WeChat, or load a local
+            # SenseVoice/Whisper model. Voice is reported unavailable until a
+            # later external-provider phase supplies it explicitly.
+            self.server.advertise_lan = False
+            # Fail closed if an old local config carried the development
+            # wildcard; browser origins must be explicitly enumerated later.
+            self.server.cors_origins = [
+                origin.strip()
+                for origin in self.server.cors_origins
+                if origin.strip() and origin.strip() != "*"
+            ]
+            self.stt.engine = "none"
+            self.tools.enabled = [
+                name for name in self.tools.enabled if not name.startswith("wechat_")
+            ]
+
+    @property
+    def is_cloud(self) -> bool:
+        return self.profile == "cloud"
+
     def resolve(self, rel: str) -> Path:
         p = Path(rel)
         return p if p.is_absolute() else (self.project_dir / p)
@@ -170,6 +200,9 @@ class AppConfig(BaseModel):
         raw: dict = {}
         if path.exists():
             raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        profile_override = os.environ.get("MIRU_PROFILE", "").strip()
+        if profile_override:
+            raw["profile"] = profile_override
         raw = _resolve_env(raw)
         cfg = cls.model_validate(raw)
         cfg.config_dir = path.parent

@@ -7,7 +7,6 @@ import 'core/server_discovery.dart';
 import 'core/ws_client.dart';
 import 'features/chat/chat_controller.dart';
 import 'features/chat/chat_screen.dart';
-import 'features/settings/settings_screen.dart';
 
 class MiruApp extends StatelessWidget {
   const MiruApp({super.key});
@@ -52,11 +51,13 @@ class _BootstrapState extends State<_Bootstrap> {
       future: _configFuture,
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+              body: Center(child: CircularProgressIndicator()));
         }
         final config = snapshot.data!;
         final player = PlayerService();
-        return ChatScreen(controller: _buildController(config, player), player: player);
+        return ChatScreen(
+            controller: _buildController(config, player), player: player);
       },
     );
   }
@@ -66,7 +67,7 @@ class _BootstrapState extends State<_Bootstrap> {
     final ws = WsClient(
       url: config.wsUri,
       token: config.token,
-      hello: config.hello,   // 含 synth_tts / auto_run 等当前设置
+      hello: config.hello, // 含 synth_tts / auto_run 等当前设置
     );
     final controller = ChatController(
       config: config,

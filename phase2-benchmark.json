@@ -1,0 +1,107 @@
+{
+  "timestamp_utc": "2026-08-28T07:17:59.569878+00:00",
+  "project": "miru-phase2",
+  "docker_server_version": "29.7.2",
+  "api": {
+    "/healthz": {
+      "status": 200,
+      "latency_ms": 63.49,
+      "body_bytes_sampled": 15
+    },
+    "/readyz": {
+      "status": 200,
+      "latency_ms": 2.31,
+      "body_bytes_sampled": 73
+    },
+    "/api/status": {
+      "status": 200,
+      "latency_ms": 1.78,
+      "body_bytes_sampled": 537
+    }
+  },
+  "health_samples": [
+    {
+      "status": 200,
+      "latency_ms": 1.64,
+      "body_bytes_sampled": 15
+    },
+    {
+      "status": 200,
+      "latency_ms": 1.37,
+      "body_bytes_sampled": 15
+    },
+    {
+      "status": 200,
+      "latency_ms": 1.33,
+      "body_bytes_sampled": 15
+    },
+    {
+      "status": 200,
+      "latency_ms": 1.41,
+      "body_bytes_sampled": 15
+    },
+    {
+      "status": 200,
+      "latency_ms": 1.32,
+      "body_bytes_sampled": 15
+    },
+    {
+      "status": 200,
+      "latency_ms": 1.71,
+      "body_bytes_sampled": 15
+    },
+    {
+      "status": 200,
+      "latency_ms": 1.53,
+      "body_bytes_sampled": 15
+    },
+    {
+      "status": 200,
+      "latency_ms": 1.49,
+      "body_bytes_sampled": 15
+    },
+    {
+      "status": 200,
+      "latency_ms": 1.48,
+      "body_bytes_sampled": 15
+    },
+    {
+      "status": 200,
+      "latency_ms": 1.47,
+      "body_bytes_sampled": 15
+    }
+  ],
+  "containers": [
+    {
+      "name": "miru-phase2-caddy",
+      "cpu_percent": "0.00%",
+      "memory_usage": "12.57MiB / 96MiB",
+      "memory_percent": "13.09%",
+      "pids": "14"
+    },
+    {
+      "name": "miru-phase2-mock-llm",
+      "cpu_percent": "0.01%",
+      "memory_usage": "17.42MiB / 128MiB",
+      "memory_percent": "13.61%",
+      "pids": "1"
+    },
+    {
+      "name": "miru-phase2-api",
+      "cpu_percent": "0.16%",
+      "memory_usage": "78.79MiB / 640MiB",
+      "memory_percent": "12.31%",
+      "pids": "6"
+    }
+  ],
+  "swap": "NOT AVAILABLE",
+  "major_page_faults": "NOT AVAILABLE",
+  "oom_killed": "NOT AVAILABLE",
+  "restart_count": "NOT AVAILABLE",
+  "disk_use": "NOT AVAILABLE",
+  "websocket": "NOT AVAILABLE (requires an explicit WS client test)",
+  "health_latency_ms": {
+    "p50": 1.48,
+    "p95": 1.64
+  }
+}

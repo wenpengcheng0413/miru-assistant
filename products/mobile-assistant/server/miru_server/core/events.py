@@ -67,6 +67,10 @@ def process_step(
     })
 
 
+def system_status(status: dict) -> dict:
+    return event({"type": "system_status", "status": status})
+
+
 def sentence(text: str, audio_format: str, sample_rate: int, channels: int = 1) -> dict:
     return event({
         "type": "sentence",

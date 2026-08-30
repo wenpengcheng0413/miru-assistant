@@ -28,6 +28,9 @@ copy config\persona.example.yaml config\persona\miru.yaml
 #    编辑 settings.yaml：至少设置 llm.api_key（或环境变量 MIRU_DEEPSEEK_API_KEY）
 #    （.env.example 里的环境变量会自动通过 ${VAR} 被 settings.yaml 引用）
 
+# Cloud profile（Linux/云端；不导入微信/Windows 运行时、不加载本地 STT）
+$env:MIRU_PROFILE = "cloud"
+
 # 3. 启动
 .\.venv\Scripts\python -m miru_server            # http://127.0.0.1:8765
 
@@ -62,7 +65,7 @@ cd products/mobile-assistant/server
 
 | 项 | 说明 |
 |----|------|
-| `MIRU_SERVER_TOKEN` | 不设置则每次启动随机生成并打印到日志——正式使用务必固定 |
+| `MIRU_SERVER_TOKEN` | cloud profile 必须设置；缺失时拒绝启动。development 可临时生成（不写入日志） |
 | `server.host` | 默认 127.0.0.1；手机连局域网用 0.0.0.0；**永远不要裸奔公网**（用 Tailscale/frp，见 `../docs/01-总体架构与选型.md` §6） |
 | `server.advertise_lan` | 默认开启 `_miru._tcp` Bonjour 广播，手机可自动发现 DHCP 变化后的电脑地址 |
 | `stt.engine: none` | 没下载模型也能跑（纯文本模式）；`sensevoice` 需先跑下载脚本 |

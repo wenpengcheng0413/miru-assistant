@@ -9,6 +9,7 @@ import re
 import struct
 import uuid
 from pathlib import Path
+from pathlib import PurePosixPath
 
 from fastapi import HTTPException, UploadFile
 
@@ -52,7 +53,43 @@ def detect_type(data: bytes, filename: str) -> tuple[str, str, str]:
     raise HTTPException(415, "仅支持 JPG、PNG、GIF、WebP、PDF、Word、Excel、PPT、CSV、TXT、Markdown")
 
 
-async def save_upload(upload: UploadFile, root: str | Path, config: AttachmentConfig) -> dict:
+class AttachmentStorage:
+    """Filesystem storage behind a stable, path-independent attachment key.
+
+    The key is persisted in SQLite while ``local_path`` remains a compatibility
+    field for the current Windows implementation.  ``key_path`` rejects any
+    caller-supplied absolute or traversal path before resolving it under root.
+    """
+
+    def __init__(self, root: str | Path):
+        self.root = Path(root).expanduser().resolve()
+
+    def ensure(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def key_path(self, storage_key: str) -> Path:
+        if not storage_key or "\\" in storage_key or re.match(r"^[A-Za-z]:", storage_key):
+            raise ValueError("invalid attachment storage key")
+        key = PurePosixPath(storage_key)
+        if key.is_absolute() or any(part in {"", ".", ".."} for part in key.parts):
+            raise ValueError("invalid attachment storage key")
+        candidate = (self.root / Path(*key.parts)).resolve()
+        try:
+            candidate.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError("attachment storage key escapes root") from exc
+        return candidate
+
+    def path_for(self, attachment_id: str, filename: str) -> tuple[str, Path]:
+        storage_key = f"{attachment_id}/{filename}"
+        return storage_key, self.key_path(storage_key)
+
+
+async def save_upload(
+    upload: UploadFile,
+    root: str | Path | AttachmentStorage,
+    config: AttachmentConfig,
+) -> dict:
     max_bytes = max(config.max_file_mb, 1) * 1024 * 1024
     data = await upload.read(max_bytes + 1)
     if not data:
@@ -62,10 +99,11 @@ async def save_upload(upload: UploadFile, root: str | Path, config: AttachmentCo
     filename = safe_filename(upload.filename or "附件")
     media_type, kind, extension = detect_type(data, filename)
     attachment_id = uuid.uuid4().hex
-    folder = Path(root) / attachment_id
-    folder.mkdir(parents=True, exist_ok=False)
+    storage = root if isinstance(root, AttachmentStorage) else AttachmentStorage(root)
+    storage.ensure()
     final_name = filename if Path(filename).suffix else f"{filename}{extension}"
-    path = folder / final_name
+    storage_key, path = storage.path_for(attachment_id, final_name)
+    path.parent.mkdir(parents=True, exist_ok=False)
     path.write_bytes(data)
     return {
         "id": attachment_id,
@@ -74,6 +112,7 @@ async def save_upload(upload: UploadFile, root: str | Path, config: AttachmentCo
         "kind": kind,
         "size_bytes": len(data),
         "sha256": hashlib.sha256(data).hexdigest(),
+        "storage_key": storage_key,
         "local_path": str(path),
     }
 

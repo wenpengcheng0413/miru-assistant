@@ -13,6 +13,8 @@ workflows:
       flutter: 3.41.7
       xcode: latest
       cocoapods: default
+      # MIRU_BASE_URL 在 Codemagic UI 中配置为非 Secret 环境变量。
+      # App Token 永远不进入构建环境或 IPA，仍由用户写入 iOS Keychain。
     triggering:
       events:
         - push
@@ -33,19 +35,14 @@ workflows:
           cp -R /tmp/miru_shell/ios ios
           rm -rf /tmp/miru_shell
           ls -la ios/
-      # 关键：注入麦克风/本地网络权限与 ATS 例外（没有麦克风描述，录音必崩）
+      # 生产 App 只请求真实需要的权限。Tailnet 使用 HTTPS/WSS，不需要 Bonjour、
+      # Local Network 权限或 ATS 任意明文放行。
       - name: Patch Info.plist permissions
         script: |
           PLIST=ios/Runner/Info.plist
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Miru 需要麦克风来听你说话'" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Miru 需要相机来拍摄并分析图片'" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Miru 需要访问照片以分析你选择的图片'" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Miru 需要连接你电脑上的后端服务'" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices array" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices:0 string '_miru._tcp'" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST"
           cat "$PLIST"
       # unsigned 设备构建必须显式禁用签名（否则报 "requires a selected Development Team"）
       - name: Disable code signing
@@ -63,6 +60,14 @@ workflows:
       # 手动生成 Generated.xcconfig + pod install + 直接 xcodebuild（命令行为 unsigned 显式开关）
       - name: Generate Xcode config manually
         script: |
+          if [ -z "$MIRU_BASE_URL" ]; then
+            echo "ERROR: MIRU_BASE_URL is required for the production Tailnet build"
+            exit 1
+          fi
+          case "$MIRU_BASE_URL" in
+            https://*) ;;
+            *) echo "ERROR: MIRU_BASE_URL must use HTTPS"; exit 1 ;;
+          esac
           echo "=== 诊断：flutter 安装情况 ==="
           which flutter
           flutter --version
@@ -83,17 +88,18 @@ workflows:
               idx = p.find('/flutter_tools')
           print(p[:idx] if idx > 0 else 'UNKNOWN')")
           echo "FLUTTER_ROOT=$FLUTTER_ROOT"
+          DART_DEFINES=$(python3 -c "import base64,os; values=['MIRU_DEPLOYMENT_PROFILE=tailnet','MIRU_BASE_URL='+os.environ['MIRU_BASE_URL'].rstrip('/')]; print(','.join(base64.b64encode(v.encode()).decode() for v in values))")
           cat > ios/Flutter/Generated.xcconfig << EOF
           FLUTTER_ROOT=$FLUTTER_ROOT
           FLUTTER_APPLICATION_PATH=$PWD
           COCOAPODS_PARALLEL_CODE_SIGN=true
           FLUTTER_BUILD_DIR=build
-          FLUTTER_BUILD_NAME=0.2.1
-          FLUTTER_BUILD_NUMBER=2
-          DART_DEFINES=
+          FLUTTER_BUILD_NAME=0.3.0
+          FLUTTER_BUILD_NUMBER=3
+          DART_DEFINES=$DART_DEFINES
           PACKAGE_CONFIG=$PWD/.dart_tool/package_config.json
           EOF
-          cat ios/Flutter/Generated.xcconfig
+          grep -v '^DART_DEFINES=' ios/Flutter/Generated.xcconfig
       - name: Pod install
         script: cd ios && pod install
       - name: Build app bundle (xcodebuild, unsigned)

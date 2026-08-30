@@ -11,7 +11,6 @@ class PlayerService {
   final List<Uint8List> _queue = [];
   final BytesBuilder _current = BytesBuilder();
   bool _playing = false;
-  int _played = 0; // 统计（设置页可显示）
 
   /// 显式音频上下文：忽略 iOS 侧边静音拨片。
   /// 否则录音插件留下的 playAndRecord 会话会让 TTS 播放被静音键静音。
@@ -41,7 +40,6 @@ class PlayerService {
     if (_playing || _queue.isEmpty) return;
     _playing = true;
     final bytes = _queue.removeAt(0);
-    _played++;
     await _player.play(BytesSource(bytes), ctx: _ttsContext);
   }
 

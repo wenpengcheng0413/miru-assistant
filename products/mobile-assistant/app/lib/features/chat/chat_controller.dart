@@ -9,6 +9,7 @@ import '../../core/audio/player_service.dart';
 import '../../core/audio/recorder_service.dart';
 import '../../core/config.dart';
 import '../../core/server_discovery.dart';
+import '../../core/system_status.dart';
 import '../../core/ws_client.dart';
 
 enum ChatPhase { idle, listening, thinking, speaking }
@@ -129,7 +130,8 @@ class PendingAttachment {
   final String kind;
   final int sizeBytes;
 
-  factory PendingAttachment.fromJson(Map<dynamic, dynamic> json) => PendingAttachment(
+  factory PendingAttachment.fromJson(Map<dynamic, dynamic> json) =>
+      PendingAttachment(
         id: json['id'] as String? ?? '',
         filename: json['filename'] as String? ?? '附件',
         kind: json['kind'] as String? ?? 'document',
@@ -186,6 +188,13 @@ class ChatController extends ChangeNotifier {
   /// 离线横幅显示的最近一次错误/状态
   String wsStatus = '正在连接…';
 
+  MiruSystemStatus? systemStatus;
+  DateTime? systemStatusReceivedAt;
+
+  bool get systemStatusStale =>
+      systemStatusReceivedAt == null ||
+      _now().difference(systemStatusReceivedAt!) > const Duration(minutes: 2);
+
   Timer? _listenTimer; // 录音兜底：手势丢失时最多录 60 秒
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
@@ -207,7 +216,7 @@ class ChatController extends ChangeNotifier {
       _reconnectTimer?.cancel();
       _reconnectAttempts = 0;
       wsConnected = true;
-      wsStatus = '已连接';
+      wsStatus = config.requiresHttps ? 'Cloud 已连接' : '已连接';
       final reconnected = _everConnected;
       _everConnected = true;
       if (reconnected) {
@@ -240,9 +249,7 @@ class ChatController extends ChangeNotifier {
     final attempt = _reconnectAttempts;
     final seconds = attempt <= 0
         ? 3
-        : (attempt <= 2
-            ? 3 * (1 << attempt)
-            : (attempt == 3 ? 24 : 30));
+        : (attempt <= 2 ? 3 * (1 << attempt) : (attempt == 3 ? 24 : 30));
     _reconnectTimer = Timer(Duration(seconds: seconds), () {
       if (_disposed) return;
       _reconnectAttempts++;
@@ -260,7 +267,8 @@ class ChatController extends ChangeNotifier {
       // required to fix it.
       return;
     }
-    final shouldDiscover = !_discoveryActive &&
+    final shouldDiscover = config.bonjourEnabled &&
+        !_discoveryActive &&
         (_reconnectAttempts == 0 || _reconnectAttempts % 5 == 0);
     if (!shouldDiscover) {
       _scheduleReconnect();
@@ -331,15 +339,15 @@ class ChatController extends ChangeNotifier {
     if (conversationId == null || conversationId.isEmpty) return;
 
     try {
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 6),
-        receiveTimeout: const Duration(seconds: 10),
-      ));
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 6),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
+      );
       final resp = await dio.get(
         '${config.restBaseUrl}/api/conversations/$conversationId/messages?limit=100',
-        options: Options(headers: {
-          'Authorization': 'Bearer ${config.token}',
-        }),
+        options: Options(headers: {'Authorization': 'Bearer ${config.token}'}),
       );
       final rows = (resp.data as List?) ?? const [];
       final history = <ChatLine>[];
@@ -373,14 +381,16 @@ class ChatController extends ChangeNotifier {
             progressStatus = '正在继续后台任务…';
           }
         } else if (role == 'assistant') {
-          history.add(ChatLine(
-            'miru',
-            content,
-            id: '${row['id'] ?? ''}',
-            turnId: turnId,
-            stats: stats,
-            steps: traceSteps,
-          ));
+          history.add(
+            ChatLine(
+              'miru',
+              content,
+              id: '${row['id'] ?? ''}',
+              turnId: turnId,
+              stats: stats,
+              steps: traceSteps,
+            ),
+          );
         }
       }
       if (history.isEmpty) return;
@@ -399,11 +409,13 @@ class ChatController extends ChangeNotifier {
     }
   }
 
-  Dio _api() => Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 6),
-        receiveTimeout: const Duration(seconds: 12),
-        headers: {'Authorization': 'Bearer ${config.token}'},
-      ));
+  Dio _api() => Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 6),
+          receiveTimeout: const Duration(seconds: 12),
+          headers: {'Authorization': 'Bearer ${config.token}'},
+        ),
+      );
 
   Future<void> loadConversations({String query = ''}) async {
     if (conversationsLoading) return;
@@ -413,12 +425,20 @@ class ChatController extends ChangeNotifier {
     try {
       final response = await _api().get(
         '${config.restBaseUrl}/api/conversations',
-        queryParameters: {'limit': 100, if (query.trim().isNotEmpty) 'q': query.trim()},
+        queryParameters: {
+          'limit': 100,
+          if (query.trim().isNotEmpty) 'q': query.trim(),
+        },
       );
       final rows = (response.data as List?) ?? const [];
       conversations
         ..clear()
-        ..addAll(rows.whereType<Map>().map(ConversationBrief.fromJson).where((c) => c.id.isNotEmpty));
+        ..addAll(
+          rows
+              .whereType<Map>()
+              .map(ConversationBrief.fromJson)
+              .where((c) => c.id.isNotEmpty),
+        );
     } catch (_) {
       conversationsError = '会话列表暂时无法加载';
     } finally {
@@ -448,9 +468,12 @@ class ChatController extends ChangeNotifier {
   }
 
   Future<void> selectConversation(String conversationId) async {
-    if (conversationId.isEmpty || conversationId == config.lastConversationId) return;
+    if (conversationId.isEmpty || conversationId == config.lastConversationId)
+      return;
     if (!wsConnected) return;
-    if (phase == ChatPhase.listening || phase == ChatPhase.thinking || phase == ChatPhase.speaking) {
+    if (phase == ChatPhase.listening ||
+        phase == ChatPhase.thinking ||
+        phase == ChatPhase.speaking) {
       await interrupt();
     }
     config.lastConversationId = conversationId;
@@ -462,7 +485,11 @@ class ChatController extends ChangeNotifier {
     toolStatus = '';
     progressStatus = '';
     _resetActiveTurn();
-    ws.updateTarget(url: config.wsUri, token: config.token, hello: config.hello);
+    ws.updateTarget(
+      url: config.wsUri,
+      token: config.token,
+      hello: config.hello,
+    );
     wsStatus = '正在打开历史会话…';
     notifyListeners();
     await ws.reconnect();
@@ -485,7 +512,9 @@ class ChatController extends ChangeNotifier {
 
   Future<void> deleteConversation(String conversationId) async {
     try {
-      await _api().delete('${config.restBaseUrl}/api/conversations/$conversationId');
+      await _api().delete(
+        '${config.restBaseUrl}/api/conversations/$conversationId',
+      );
       if (conversationId == config.lastConversationId) {
         config.lastConversationId = '';
         await config.save();
@@ -505,14 +534,19 @@ class ChatController extends ChangeNotifier {
     if (!wsConnected) return null;
     try {
       final response = await _api().post(
-        '${config.restBaseUrl}/api/conversations', data: {'persona': 'miru'},
+        '${config.restBaseUrl}/api/conversations',
+        data: {'persona': 'miru'},
       );
       final id = (response.data as Map?)?['id'] as String? ?? '';
       if (id.isEmpty) return null;
       config.lastConversationId = id;
       await config.save();
       _historyLoaded = false;
-      ws.updateTarget(url: config.wsUri, token: config.token, hello: config.hello);
+      ws.updateTarget(
+        url: config.wsUri,
+        token: config.token,
+        hello: config.hello,
+      );
       await ws.reconnect();
       return id;
     } catch (_) {
@@ -536,14 +570,19 @@ class ChatController extends ChangeNotifier {
       final response = await _api().post(
         '${config.restBaseUrl}/api/conversations/$conversationId/attachments',
         data: FormData.fromMap({
-          'file': await MultipartFile.fromFile(localPath, filename: filename ?? file.uri.pathSegments.last),
+          'file': await MultipartFile.fromFile(
+            localPath,
+            filename: filename ?? file.uri.pathSegments.last,
+          ),
         }),
       );
       final item = PendingAttachment.fromJson(response.data as Map);
       if (item.id.isEmpty) throw StateError('上传结果无效');
       pendingAttachments.add(item);
     } on DioException catch (e) {
-      final message = e.response?.data is Map ? (e.response?.data['detail'] as String?) : null;
+      final message = e.response?.data is Map
+          ? (e.response?.data['detail'] as String?)
+          : null;
       lines.add(ChatLine('note', '附件上传失败：${message ?? '请检查网络或文件格式'}'));
     } catch (_) {
       lines.add(ChatLine('note', '附件上传失败，请稍后重试'));
@@ -562,6 +601,11 @@ class ChatController extends ChangeNotifier {
   void _onJson(Map<String, dynamic> e) {
     final type = e['type'] as String? ?? '';
     switch (type) {
+      case 'system_status':
+        final payload = e['status'] is Map ? e['status'] as Map : e;
+        systemStatus = MiruSystemStatus.fromJson(payload);
+        systemStatusReceivedAt = _now();
+        notifyListeners();
       case 'stt_partial':
         partialText = e['text'] as String? ?? '';
         notifyListeners();
@@ -610,7 +654,9 @@ class ChatController extends ChangeNotifier {
           activeProcessExpanded = true;
         }
         final step = ProcessStep.fromJson(e);
-        final index = activeProcessSteps.indexWhere((item) => item.seq == step.seq);
+        final index = activeProcessSteps.indexWhere(
+          (item) => item.seq == step.seq,
+        );
         if (index >= 0) {
           activeProcessSteps[index] = step;
         } else {
@@ -660,19 +706,21 @@ class ChatController extends ChangeNotifier {
         notifyListeners();
       case 'error':
         if (miruText.isNotEmpty) {
-          lines.add(ChatLine(
-            'miru',
-            miruText,
-            turnId: activeTurnId,
-            stats: TurnStats(
-              status: 'failed',
-              durationMs: 0,
-              promptTokens: 0,
-              completionTokens: 0,
-              costRmb: 0,
+          lines.add(
+            ChatLine(
+              'miru',
+              miruText,
+              turnId: activeTurnId,
+              stats: TurnStats(
+                status: 'failed',
+                durationMs: 0,
+                promptTokens: 0,
+                completionTokens: 0,
+                costRmb: 0,
+              ),
+              steps: List<ProcessStep>.from(activeProcessSteps),
             ),
-            steps: List<ProcessStep>.from(activeProcessSteps),
-          ));
+          );
           miruText = '';
         }
         lines.add(ChatLine('note', '⚠️ ${e['message'] ?? e['code']}'));
@@ -685,10 +733,17 @@ class ChatController extends ChangeNotifier {
 
   void _addUserLine(String text, {String turnId = ''}) {
     if (text.isEmpty) return;
-    if (lines.isNotEmpty && lines.last.kind == 'user' && lines.last.text == text) {
+    if (lines.isNotEmpty &&
+        lines.last.kind == 'user' &&
+        lines.last.text == text) {
       return; // 去重（重发同一句时不重复显示）
     }
     lines.add(ChatLine('user', text, turnId: turnId));
+  }
+
+  void toggleActiveProcessExpanded() {
+    activeProcessExpanded = !activeProcessExpanded;
+    notifyListeners();
   }
 
   void _resetActiveTurn({bool keepStats = false}) {

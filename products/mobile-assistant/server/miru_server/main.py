@@ -23,45 +23,63 @@ from .db.backup import backup_database
 from .discovery import LanServiceAdvertiser
 from .logging_setup import setup_logging
 from .services import create_services
-from .wechat_runtime import ensure_miru_import_path, runtime_build_id
 
 logger = logging.getLogger(__name__)
 
 
+def _runtime_build_id(config: AppConfig) -> str:
+    """Keep the Windows WeChat boundary out of the cloud import path."""
+    if config.is_cloud:
+        return os.environ.get("MIRU_BUILD_ID", "").strip() or __import__("miru_server").__version__
+    from .wechat_runtime import runtime_build_id
+
+    return runtime_build_id()
+
+
 def create_app(config: AppConfig) -> FastAPI:
-    # 后台服务与命令行使用同一份微信离线读取包，避免仅交互式 shell 可导入。
-    ensure_miru_import_path()
+    # Cloud profile deliberately avoids even preparing the Windows-only
+    # daily-report import boundary. Development/node retain local behavior.
+    if not config.is_cloud:
+        from .wechat_runtime import ensure_miru_import_path
+
+        ensure_miru_import_path()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         import asyncio
 
+        if config.is_cloud and not config.server.token:
+            # Fail closed before creating a database/service runtime. Never
+            # invent or log an authentication token in the cloud profile.
+            raise RuntimeError("MIRU_SERVER_TOKEN is required in cloud profile")
+
         services = create_services(config)
         if not config.server.token:
             config.server.token = secrets.token_urlsafe(24)
-            logger.warning(
-                "MIRU_SERVER_TOKEN 未设置，本次会话随机令牌: %s（重启会变，请尽快固定）",
-                config.server.token,
-            )
+            logger.warning("MIRU_SERVER_TOKEN 未设置，开发模式使用临时令牌（不会记录令牌值）")
         app.state.services = services
         app.state.started_at = datetime.now(timezone.utc).isoformat()
         logger.info(
-            "Miru runtime ready: build=%s python=%s miru_path=%s",
-            runtime_build_id(), os.sys.executable, ensure_miru_import_path(),
+            "Miru runtime ready: build=%s python=%s profile=%s",
+            _runtime_build_id(config), os.sys.executable, config.profile,
         )
 
         # Bonjour/mDNS：手机可按服务名发现电脑，不再依赖固定 DHCP 地址。
         # 开机早期网卡可能尚未就绪，所以后台定期刷新；失败不阻塞主服务。
-        advertiser = LanServiceAdvertiser(config.server)
+        advertiser = LanServiceAdvertiser(config.server) if not config.is_cloud else None
 
         async def _advertise_loop() -> None:
             while True:
                 try:
-                    await asyncio.to_thread(advertiser.refresh)
+                    if advertiser is not None:
+                        await asyncio.to_thread(advertiser.refresh)
                 except Exception:
-                    logger.warning("局域网服务发布检查失败", exc_info=True)
+                    logger.warning("局域网服务发布检查失败: error_code=discovery_failed")
                 await asyncio.sleep(30)
 
-        advertiser_task = asyncio.create_task(_advertise_loop())
+        advertiser_task: asyncio.Task | None = None
+        if advertiser is not None:
+            advertiser_task = asyncio.create_task(_advertise_loop())
 
         # 每天一个一致性 SQLite 快照；应用或 IPA 升级不会触碰 data/backups。
         backup_task: asyncio.Task | None = None
@@ -76,8 +94,11 @@ def create_app(config: AppConfig) -> FastAPI:
                             config.backup.retention_days,
                         )
                         logger.info("Miru 数据库备份完成: %s", saved)
-                    except Exception:
-                        logger.warning("Miru 数据库备份失败", exc_info=True)
+                    except Exception as exc:
+                        logger.warning(
+                            "Miru 数据库备份失败: exception_type=%s error_code=backup_failed",
+                            type(exc).__name__,
+                        )
                     await asyncio.sleep(6 * 60 * 60)
 
             backup_task = asyncio.create_task(_backup_loop())
@@ -99,19 +120,30 @@ def create_app(config: AppConfig) -> FastAPI:
             unloader.cancel()
         if backup_task is not None:
             backup_task.cancel()
-        advertiser_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await advertiser_task
-        await asyncio.to_thread(advertiser.close)
+        if advertiser_task is not None:
+            advertiser_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await advertiser_task
+        if advertiser is not None:
+            await asyncio.to_thread(advertiser.close)
 
     app = FastAPI(title="Miru Server", version="0.1.0", lifespan=lifespan)
+    if config.is_cloud:
+        cors_origins = list(config.server.cors_origins)
+        cors_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+        cors_headers = ["Authorization", "Content-Type"]
+    else:
+        cors_origins = ["*"]
+        cors_methods = ["*"]
+        cors_headers = ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],           # 局域网工具访问；安全靠 token 鉴权
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=cors_origins,
+        allow_methods=cors_methods,
+        allow_headers=cors_headers,
     )
     app.include_router(ws.router)
+    app.include_router(rest.public_router)
     app.include_router(rest.router)
 
     @app.get("/")
@@ -129,10 +161,13 @@ def create_app(config: AppConfig) -> FastAPI:
 def run() -> None:
     parser = argparse.ArgumentParser(description="Miru 语音 AI 工作台后端")
     parser.add_argument("--config", default=None, help="settings.yaml 路径")
+    parser.add_argument("--profile", choices=["development", "cloud", "node"], default=None)
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
     args = parser.parse_args()
 
+    if args.profile:
+        os.environ["MIRU_PROFILE"] = args.profile
     config = AppConfig.load(args.config)
     host = args.host or config.server.host
     port = args.port or config.server.port

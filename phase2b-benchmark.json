@@ -1,0 +1,161 @@
+{
+  "host_limit_observed": {
+    "cpus": 2,
+    "mem_total_mib": 1904.10546875,
+    "swap_total_mib": 2048.0
+  },
+  "scenarios": [
+    {
+      "name": "idle",
+      "sample_count": 10,
+      "errors": [],
+      "health_statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "health_p50_ms": 16.25,
+      "health_p95_ms": 16.94,
+      "host_total_mib_peak": 1904.11,
+      "host_available_mib_min": 1210.45,
+      "host_used_mib_peak": 693.65,
+      "host_swap_used_mib_peak": 0.27,
+      "miru-phase2-api_memory_peak_mib": 99.82,
+      "miru-phase2-api_cpu_peak_pct": 0.13,
+      "miru-phase2-caddy_memory_peak_mib": 12.74,
+      "miru-phase2-caddy_cpu_peak_pct": 0.01,
+      "miru-phase2-mock-llm_memory_peak_mib": 17.78,
+      "miru-phase2-mock-llm_cpu_peak_pct": 0.01
+    },
+    {
+      "name": "single_chat",
+      "sample_count": 6,
+      "errors": [],
+      "health_statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "health_p50_ms": 2.44,
+      "health_p95_ms": 16.48,
+      "host_total_mib_peak": 1904.11,
+      "host_available_mib_min": 1209.54,
+      "host_used_mib_peak": 694.57,
+      "host_swap_used_mib_peak": 0.27,
+      "miru-phase2-api_memory_peak_mib": 99.92,
+      "miru-phase2-api_cpu_peak_pct": 19.08,
+      "miru-phase2-caddy_memory_peak_mib": 12.79,
+      "miru-phase2-caddy_cpu_peak_pct": 1.87,
+      "miru-phase2-mock-llm_memory_peak_mib": 17.91,
+      "miru-phase2-mock-llm_cpu_peak_pct": 6.49
+    },
+    {
+      "name": "long_chat",
+      "sample_count": 6,
+      "errors": [],
+      "health_statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "health_p50_ms": 2.55,
+      "health_p95_ms": 15.92,
+      "host_total_mib_peak": 1904.11,
+      "host_available_mib_min": 1208.85,
+      "host_used_mib_peak": 695.25,
+      "host_swap_used_mib_peak": 0.27,
+      "miru-phase2-api_memory_peak_mib": 100.0,
+      "miru-phase2-api_cpu_peak_pct": 0.12,
+      "miru-phase2-caddy_memory_peak_mib": 16.11,
+      "miru-phase2-caddy_cpu_peak_pct": 0.75,
+      "miru-phase2-mock-llm_memory_peak_mib": 17.91,
+      "miru-phase2-mock-llm_cpu_peak_pct": 0.01
+    },
+    {
+      "name": "two_concurrent_turns",
+      "sample_count": 7,
+      "errors": [],
+      "health_statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "health_p50_ms": 2.31,
+      "health_p95_ms": 2.34,
+      "host_total_mib_peak": 1904.11,
+      "host_available_mib_min": 1211.73,
+      "host_used_mib_peak": 692.38,
+      "host_swap_used_mib_peak": 0.27,
+      "miru-phase2-api_memory_peak_mib": 110.1,
+      "miru-phase2-api_cpu_peak_pct": 19.29,
+      "miru-phase2-caddy_memory_peak_mib": 12.11,
+      "miru-phase2-caddy_cpu_peak_pct": 0.02,
+      "miru-phase2-mock-llm_memory_peak_mib": 25.14,
+      "miru-phase2-mock-llm_cpu_peak_pct": 4.13
+    },
+    {
+      "name": "rest_ws_reconnect",
+      "sample_count": 6,
+      "errors": [],
+      "health_statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "health_p50_ms": 2.17,
+      "health_p95_ms": 2.3,
+      "host_total_mib_peak": 1904.11,
+      "host_available_mib_min": 1211.33,
+      "host_used_mib_peak": 692.77,
+      "host_swap_used_mib_peak": 0.27,
+      "miru-phase2-api_memory_peak_mib": 100.5,
+      "miru-phase2-api_cpu_peak_pct": 13.03,
+      "miru-phase2-caddy_memory_peak_mib": 12.24,
+      "miru-phase2-caddy_cpu_peak_pct": 1.84,
+      "miru-phase2-mock-llm_memory_peak_mib": 17.84,
+      "miru-phase2-mock-llm_cpu_peak_pct": 4.4
+    },
+    {
+      "name": "attachment",
+      "sample_count": 6,
+      "errors": [],
+      "health_statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "health_p50_ms": 2.56,
+      "health_p95_ms": 16.81,
+      "host_total_mib_peak": 1904.11,
+      "host_available_mib_min": 1211.23,
+      "host_used_mib_peak": 692.87,
+      "host_swap_used_mib_peak": 0.27,
+      "miru-phase2-api_memory_peak_mib": 112.1,
+      "miru-phase2-api_cpu_peak_pct": 9.37,
+      "miru-phase2-caddy_memory_peak_mib": 12.21,
+      "miru-phase2-caddy_cpu_peak_pct": 0.01,
+      "miru-phase2-mock-llm_memory_peak_mib": 17.76,
+      "miru-phase2-mock-llm_cpu_peak_pct": 0.01
+    }
+  ],
+  "host_samples": 41,
+  "major_page_faults_delta": "NOT AVAILABLE",
+  "container_state": {
+    "miru-phase2-api": "false|0|running",
+    "miru-phase2-caddy": "false|0|running",
+    "miru-phase2-mock-llm": "false|0|running"
+  },
+  "note": "synthetic only; no provider credentials or production data"
+}

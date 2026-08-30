@@ -1,0 +1,98 @@
+name: miru-phase2
+
+services:
+  miru-api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: miru-phase2-api:local
+    container_name: miru-phase2-api
+    environment:
+      MIRU_PROFILE: cloud
+      MIRU_SERVER_CONFIG: /app/config/settings.cloud.example.yaml
+      MIRU_SERVER_TOKEN: phase2-test-application-token
+      MIRU_DEEPSEEK_API_KEY: phase2-test-provider-key
+      MIRU_PUSHPLUS_TOKEN: phase2-test-push-token
+      MIRU_LLM_BASE_URL: http://mock-llm:8080/v1
+    volumes:
+      - miru-phase2-data:/app/data
+    networks:
+      - miru-phase2-network
+    expose:
+      - "8765"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 640m
+    memswap_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=2)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: miru-phase2-caddy
+    depends_on:
+      miru-api:
+        condition: service_healthy
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - miru-phase2-network
+    ports:
+      - "127.0.0.1:18080:8080"
+    restart: unless-stopped
+    mem_limit: 96m
+    memswap_limit: 128m
+    cpus: 0.2
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
+  # Only enabled with `docker compose --profile benchmark up`. This service
+  # is a synthetic provider and is explicitly counted outside Miru's API
+  # memory limit; it never receives a real credential or user data.
+  mock-llm:
+    image: python:3.12-slim
+    container_name: miru-phase2-mock-llm
+    profiles: [benchmark]
+    command: ["python", "/opt/mock_llm.py"]
+    volumes:
+      - ./mock_llm.py:/opt/mock_llm.py:ro
+    networks:
+      - miru-phase2-network
+    expose:
+      - "8080"
+    mem_limit: 128m
+    memswap_limit: 160m
+    cpus: 0.2
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  miru-phase2-data:
+    name: miru-phase2-data
+
+networks:
+  miru-phase2-network:
+    name: miru-phase2-network

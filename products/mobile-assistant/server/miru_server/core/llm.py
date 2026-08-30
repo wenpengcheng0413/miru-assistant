@@ -162,18 +162,18 @@ class LLMClient:
                     kwargs.pop("extra_body", None)
                     thinking_override = False
                     continue
-                last_error = f"请求被拒: {e}"
+                last_error = f"{type(e).__name__}"
                 break  # 400 不重试
             except AuthenticationError as e:
-                last_error = f"API key 无效: {e}"
+                last_error = f"{type(e).__name__}"
                 break
             except RETRYABLE as e:
-                last_error = f"{type(e).__name__}: {e}"
+                last_error = f"{type(e).__name__}"
                 if attempt < 2:
                     await asyncio.sleep(RETRY_DELAYS[attempt])
                     continue
             except Exception as e:  # 网络/解析等杂项
-                last_error = f"{type(e).__name__}: {e}"
+                last_error = f"{type(e).__name__}"
                 if attempt < 2:
                     await asyncio.sleep(RETRY_DELAYS[attempt])
                     continue
@@ -252,7 +252,7 @@ class LLMClient:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            logger.warning("chat_json 解析失败: %s", text[:200])
+            logger.warning("chat_json 解析失败: error_code=invalid_json")
             return {}
 
     async def vision_chat(

@@ -70,6 +70,7 @@ class Attachment(Base):
     kind: Mapped[str] = mapped_column(Text)  # image / document / spreadsheet / presentation / text
     size_bytes: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(Text, index=True)
+    storage_key: Mapped[str] = mapped_column(Text, default="", index=True)
     local_path: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, default="ready")  # ready / processing / failed
     extracted_text: Mapped[str] = mapped_column(Text, default="")

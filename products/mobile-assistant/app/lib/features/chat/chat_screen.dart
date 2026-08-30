@@ -4,7 +4,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/audio/player_service.dart';
-import '../../core/config.dart';
 import 'chat_controller.dart';
 import 'conversation_drawer.dart';
 import '../settings/settings_screen.dart';
@@ -44,8 +43,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // 切到后台时若还在录音，立刻停止——否则麦克风一直开着，
     // 环境噪声会被 STT 幻觉成句号/英文单词自动发出去
-    if (state != AppLifecycleState.resumed &&
-        c.phase == ChatPhase.listening) {
+    if (state != AppLifecycleState.resumed && c.phase == ChatPhase.listening) {
       _holding = false;
       c.stopListening();
     }
@@ -60,8 +58,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _syncedInputVersion = c.pendingInputVersion;
     if (c.pendingInput.isNotEmpty) {
       _textCtrl.text = c.pendingInput;
-      _textCtrl.selection =
-          TextSelection.collapsed(offset: _textCtrl.text.length);
+      _textCtrl.selection = TextSelection.collapsed(
+        offset: _textCtrl.text.length,
+      );
     } else {
       _textCtrl.clear();
     }
@@ -77,20 +76,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _pickImage(ImageSource source) async {
     // 不限制宽高，且使用插件支持的最高质量；避免此前 92% 质量造成的细节损失。
-    final image = await _imagePicker.pickImage(source: source, imageQuality: 100);
-    if (image != null) await c.uploadAttachment(image.path, filename: image.name);
+    final image = await _imagePicker.pickImage(
+      source: source,
+      imageQuality: 100,
+    );
+    if (image != null)
+      await c.uploadAttachment(image.path, filename: image.name);
   }
 
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: const [
-        'jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'docx', 'xlsx', 'xls',
-        'csv', 'pptx', 'txt', 'md',
+        'jpg',
+        'jpeg',
+        'png',
+        'gif',
+        'webp',
+        'pdf',
+        'docx',
+        'xlsx',
+        'xls',
+        'csv',
+        'pptx',
+        'txt',
+        'md',
       ],
     );
-    final file = (result != null && result.files.isNotEmpty) ? result.files.first : null;
-    if (file?.path != null) await c.uploadAttachment(file!.path!, filename: file.name);
+    final file =
+        (result != null && result.files.isNotEmpty) ? result.files.first : null;
+    if (file?.path != null)
+      await c.uploadAttachment(file!.path!, filename: file.name);
   }
 
   /// 手指抬起/被系统取消：结束录音（幂等，重复调用无害）
@@ -118,9 +134,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           // 语音回复快捷开关
           IconButton(
             tooltip: c.config.ttsEnabled ? '关闭语音回复' : '开启语音回复',
-            icon: Icon(c.config.ttsEnabled
-                ? Icons.volume_up_outlined
-                : Icons.volume_off_outlined),
+            icon: Icon(
+              c.config.ttsEnabled
+                  ? Icons.volume_up_outlined
+                  : Icons.volume_off_outlined,
+            ),
             onPressed: c.toggleTts,
           ),
           IconButton(
@@ -137,6 +155,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           return Column(
             children: [
               if (!c.wsConnected) _offlineBanner(context),
+              if (c.wsConnected && c.systemStatus != null)
+                _systemStatusBanner(context),
               Expanded(
                 // 点聊天区域收键盘；拖动列表滚动也收键盘
                 child: GestureDetector(
@@ -181,7 +201,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   '未连接 · ${c.wsStatus.trim().isEmpty ? '自动重连中' : c.wsStatus.trim()} · 点此检查设置',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13, color: scheme.onErrorContainer),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: scheme.onErrorContainer,
+                  ),
                 ),
               ),
             ],
@@ -195,57 +218,107 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Widget _liveArea() {
     final parts = <Widget>[];
     if (c.partialText.isNotEmpty) {
-      parts.add(Text(
-        c.partialText,
-        style: TextStyle(
-          fontSize: 15,
-          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.45),
+      parts.add(
+        Text(
+          c.partialText,
+          style: TextStyle(
+            fontSize: 15,
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurface.withValues(alpha: 0.45),
+          ),
         ),
-      ));
+      );
     }
     if (c.miruText.isNotEmpty) {
       parts.add(Text(c.miruText, style: const TextStyle(fontSize: 15)));
     }
     if (c.toolStatus.isNotEmpty) {
-      parts.add(Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: Row(
-          children: [
-            const SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(width: 8),
-            Text(c.toolStatus, style: const TextStyle(fontSize: 13)),
-          ],
+      parts.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            children: [
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 8),
+              Text(c.toolStatus, style: const TextStyle(fontSize: 13)),
+            ],
+          ),
         ),
-      ));
+      );
     }
     if (c.activeProcessSteps.isNotEmpty) {
-      parts.add(_processPanel(
-        c.activeProcessSteps,
-        expanded: c.activeProcessExpanded,
-        onToggle: () {
-          c.activeProcessExpanded = !c.activeProcessExpanded;
-          c.notifyListeners();
-        },
-      ));
+      parts.add(
+        _processPanel(
+          c.activeProcessSteps,
+          expanded: c.activeProcessExpanded,
+          onToggle: c.toggleActiveProcessExpanded,
+        ),
+      );
     }
-    if (c.phase == ChatPhase.thinking && c.miruText.isEmpty && c.toolStatus.isEmpty) {
-      parts.add(Padding(
-        padding: const EdgeInsets.only(top: 8),
+    if (c.phase == ChatPhase.thinking &&
+        c.miruText.isEmpty &&
+        c.toolStatus.isEmpty) {
+      parts.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            children: [
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                c.progressStatus.isEmpty ? '正在处理…' : c.progressStatus,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: parts,
+    );
+  }
+
+  Widget _systemStatusBanner(BuildContext context) {
+    final status = c.systemStatus!;
+    final scheme = Theme.of(context).colorScheme;
+    final stale = c.systemStatusStale;
+    return Material(
+      color: stale ? scheme.tertiaryContainer : scheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
         child: Row(
           children: [
-            const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-            const SizedBox(width: 8),
-            Text(c.progressStatus.isEmpty ? '正在处理…' : c.progressStatus,
-                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            Icon(
+              status.cloudOnline ? Icons.cloud_done_outlined : Icons.cloud_off,
+              size: 16,
+              color: status.cloudOnline ? scheme.primary : scheme.error,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '${status.cloudLabel} · ${status.homeNodeLabel}'
+                '${stale ? ' · 状态待刷新' : ''}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           ],
         ),
-      ));
-    }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: parts);
+      ),
+    );
   }
 
   Widget _messageBubble(ChatLine line) {
@@ -437,14 +510,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _copyText(String text) {
     Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已复制'), duration: Duration(milliseconds: 900)),
+      const SnackBar(
+        content: Text('已复制'),
+        duration: Duration(milliseconds: 900),
+      ),
     );
   }
 
   String _processText(List<ProcessStep> steps) => steps
-      .map((step) => step.detail.isEmpty
-          ? step.title
-          : '${step.title}：${step.detail}')
+      .map(
+        (step) =>
+            step.detail.isEmpty ? step.title : '${step.title}：${step.detail}',
+      )
       .join('\n');
 
   Widget _bottomBar(BuildContext context) {
@@ -467,17 +544,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     spacing: 6,
                     runSpacing: 4,
                     children: [
-                      ...c.pendingAttachments.map((item) => InputChip(
-                            avatar: Icon(item.kind == 'image' ? Icons.image_outlined : Icons.attach_file, size: 18),
-                            label: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 180),
-                              child: Text(item.filename, overflow: TextOverflow.ellipsis),
+                      ...c.pendingAttachments.map(
+                        (item) => InputChip(
+                          avatar: Icon(
+                            item.kind == 'image'
+                                ? Icons.image_outlined
+                                : Icons.attach_file,
+                            size: 18,
+                          ),
+                          label: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 180),
+                            child: Text(
+                              item.filename,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            onDeleted: () => c.removePendingAttachment(item.id),
-                          )),
+                          ),
+                          onDeleted: () => c.removePendingAttachment(item.id),
+                        ),
+                      ),
                       if (c.attachmentUploading)
                         const Chip(
-                          avatar: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                          avatar: SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
                           label: Text('上传中…'),
                         ),
                     ],
@@ -517,7 +608,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       hintText: '说话或输入…',
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(22),
                       ),
@@ -526,7 +619,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
                 IconButton(
                   icon: const Icon(Icons.send),
-                    onPressed: (thinking || listening || c.attachmentUploading) ? null : _send,
+                  onPressed: (thinking || listening || c.attachmentUploading)
+                      ? null
+                      : _send,
                 ),
               ],
             ),
@@ -562,7 +657,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       child: Center(
                         child: Text(
                           listening
-                              ? (c.recordRemaining > 0 && c.recordRemaining <= 10
+                              ? (c.recordRemaining > 0 &&
+                                      c.recordRemaining <= 10
                                   ? '松开结束 · 还剩 ${c.recordRemaining}s'
                                   : '松开结束 · 录音中')
                               : '按住说话',
@@ -594,9 +690,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // 注意不能只调 c.ws.reconnect()：ws.url 是旧地址构造的，改了设置也不会生效。
       c.applyServerSettings();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('配置已保存，正在重新连接…')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('配置已保存，正在重新连接…')));
       }
     }
   }

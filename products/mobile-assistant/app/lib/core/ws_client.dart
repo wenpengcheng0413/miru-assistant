@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -13,14 +11,16 @@ typedef DisconnectHandler = void Function(String reason);
 /// 把底层 WS/Dart 异常翻译成用户能看懂的人话。
 String describeWsError(Object e) {
   if (e is TimeoutException) {
-    return '连接超时：电脑端 Miru 后端可能未启动，或防火墙拦截了端口 8765';
+    return '连接超时：请检查网络、Tailscale 与 Cloud 服务状态';
   }
   final s = e.toString().toLowerCase();
-  if (s.contains('refused') || s.contains('拒绝') || s.contains('connection failed')) {
-    return '连接被拒绝：电脑端 Miru 后端未启动，或端口不是 8765';
+  if (s.contains('refused') ||
+      s.contains('拒绝') ||
+      s.contains('connection failed')) {
+    return '连接被拒绝：Cloud 服务暂不可达';
   }
   if (s.contains('unreachable') || s.contains('network is unreachable')) {
-    return '网络不可达：手机与电脑可能不在同一 Wi-Fi，或路由器开启了 AP 隔离';
+    return '网络不可达：请检查手机网络与 Tailscale 连接';
   }
   return '连接失败：$e';
 }
@@ -28,7 +28,8 @@ String describeWsError(Object e) {
 String _closeDescription(int? code, String? reason) {
   if (code == 4401) return '服务器拒绝了 token：请检查设置页的访问令牌';
   if (code == 4400) return '握手格式错误：请更新 App';
-  if (reason != null && reason.trim().isNotEmpty) return '连接已断开：${reason.trim()}';
+  if (reason != null && reason.trim().isNotEmpty)
+    return '连接已断开：${reason.trim()}';
   return '连接已断开';
 }
 
@@ -93,11 +94,7 @@ class WsClient {
       }
 
       _channel = channel;
-      channel.sink.add(jsonEncode({
-        'type': 'hello',
-        'token': token,
-        ...hello,
-      }));
+      channel.sink.add(jsonEncode({'type': 'hello', 'token': token, ...hello}));
       channel.stream.listen(
         (frame) {
           if (!_closed && generation == _generation) _onData(frame);
@@ -210,8 +207,7 @@ class WsClient {
     } catch (_) {}
   }
 
-  bool get isConnected =>
-      !_closed && _channel != null && _connectedAnnounced;
+  bool get isConnected => !_closed && _channel != null && _connectedAnnounced;
 
   Future<void> close() async {
     if (_closed) return;

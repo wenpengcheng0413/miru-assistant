@@ -1,0 +1,43 @@
+// Miru production tailnet policy candidate.
+//
+// Reviewed against the live tailnet policy on 2026-08-30. The live policy only
+// contained Tailscale's default allow-all grant and default self-SSH rule.
+// Re-inspect and merge rather than replacing blindly if the live policy drifts.
+{
+  "tagOwners": {
+    // The production server is a non-human machine. Owner is included so the
+    // current single-user tailnet can apply the tag; Admin remains an owner as
+    // required by the production runbook.
+    "tag:miru-cloud": ["autogroup:owner", "autogroup:admin"],
+  },
+
+  "grants": [
+    {
+      // User-authenticated devices owned by the tailnet Owner currently map to
+      // the approved Windows and iPhone clients. Do not tag those user devices.
+      "src": ["autogroup:owner"],
+      "dst": ["tag:miru-cloud"],
+      "ip":  ["tcp:443"],
+    },
+  ],
+
+  // Tailscale SSH is intentionally disabled for this production tailnet.
+  "ssh": [],
+
+  "tests": [
+    {
+      // A tagged non-user source must not inherit access to Miru or its
+      // management/backend ports. Positive Owner access is runtime-tested from
+      // the approved Windows client after Serve is enabled.
+      "src": "tag:miru-cloud",
+      "proto": "tcp",
+      "deny": [
+        "tag:miru-cloud:22",
+        "tag:miru-cloud:80",
+        "tag:miru-cloud:443",
+        "tag:miru-cloud:8765",
+        "tag:miru-cloud:18080",
+      ],
+    },
+  ],
+}

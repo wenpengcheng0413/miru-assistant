@@ -1,0 +1,25 @@
+# Build context is the repository root. Keep private/runtime trees out of all
+# image layers even though the Dockerfile copies only an explicit allow-list.
+.git
+.git/**
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.test-tmp
+**/.venv
+**/venv
+**/.env
+**/settings.yaml
+**/data
+**/output
+**/backup
+**/chatlog
+**/wechat_snapshot
+**/models
+products/daily-report
+products/mobile-assistant/app
+*.db
+*.db-wal
+*.db-shm
+*.key
+*.pem

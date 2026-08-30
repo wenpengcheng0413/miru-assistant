@@ -660,7 +660,10 @@ class AgentPipeline:
         try:
             await self.extractor.run_after_turn(user_text, assistant_text)
         except Exception as e:
-            logger.warning("后台记忆提取失败: %s", e)
+            logger.warning(
+                "后台记忆提取失败: exception_type=%s error_code=memory_extract_failed",
+                type(e).__name__,
+            )
 
 
 def new_conversation_id() -> str:

@@ -39,7 +39,10 @@ class MemoryExtractor:
                 return
             self.apply(result)
         except Exception as e:
-            logger.warning("记忆提取失败: %s", e)
+            logger.warning(
+                "记忆提取失败: exception_type=%s error_code=memory_extract_failed",
+                type(e).__name__,
+            )
 
     def apply(self, result: dict) -> int:
         """落库（同步），返回写入条数。"""

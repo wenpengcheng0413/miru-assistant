@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-08-30T21:58:31+08:00",
+  "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
+  "git": {
+    "branch": "master",
+    "head_before_phase5_commit": "194b8442608b3cc516d0a3ddf8118a0695cc0f44",
+    "dirty_worktree_preserved": true
+  },
+  "production": {
+    "state": "healthy",
+    "active_release": "p5-20260830-1747-194b844-2a26ad6c",
+    "rollback_release": "p4-20260829-1430-194b844-b9be8488",
+    "access": "tailscale-private-https-wss",
+    "funnel": "off",
+    "public_business_ports": "none"
+  },
+  "phases": {
+    "0": "passed",
+    "1": "passed",
+    "2": "passed",
+    "3": "passed",
+    "4": "passed",
+    "5": {
+      "state": "in_progress",
+      "completed_gates": [
+        "cloud profile and production HTTPS enforcement",
+        "token stored by app secure storage and absent from source/build defines",
+        "Bonjour disabled for cloud profiles",
+        "versioned REST and WebSocket system status",
+        "production server atomic deployment and rollback verification",
+        "real Tailnet HTTPS/WSS/chat/history verification",
+        "server regression: 92 passed",
+        "Flutter analyze: no issues",
+        "Flutter tests: 7 passed"
+      ],
+      "pending_gates": [
+        "Codemagic unsigned iOS IPA build on macOS",
+        "install version 0.3.0+3 on iPhone",
+        "physical iPhone 5G/background/reopen/wrong-token/cloud-restart checks",
+        "physical PC-off Cloud-only acceptance"
+      ]
+    },
+    "6": "blocked_by_phase5_physical_gate",
+    "7": "pending",
+    "8": "pending",
+    "9": "pending",
+    "10": "pending"
+  },
+  "next_action": "publish the scoped Phase 5 mobile commit, run Codemagic on macOS, then perform the mandatory iPhone and PC-off acceptance",
+  "evidence_root": "docs/evidence/phase5/p5-20260830-1747-194b844-2a26ad6c"
+}

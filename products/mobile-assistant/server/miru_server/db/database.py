@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
+from .migrations import apply_migrations
 from .models import Base
 
 engine = None
@@ -30,17 +31,9 @@ def init_db(db_path: str | Path) -> sessionmaker[Session]:
         cur.close()
 
     Base.metadata.create_all(engine)
-    # create_all 只会新建表，无法给已发布的表加列；这里保留轻量、幂等的 SQLite 升级。
+    # create_all only creates missing tables. Versioned, transactional
+    # migrations safely upgrade pre-versioned databases without deleting data.
     with engine.begin() as conn:
-        attachment_columns = {
-            row[1] for row in conn.execute(text("PRAGMA table_info(attachments)"))
-        }
-        if attachment_columns and "preview_paths" not in attachment_columns:
-            conn.execute(text("ALTER TABLE attachments ADD COLUMN preview_paths TEXT NOT NULL DEFAULT '[]'"))
-        message_columns = {
-            row[1] for row in conn.execute(text("PRAGMA table_info(messages)"))
-        }
-        if message_columns and "turn_id" not in message_columns:
-            conn.execute(text("ALTER TABLE messages ADD COLUMN turn_id TEXT"))
+        apply_migrations(conn)
     SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
     return SessionLocal

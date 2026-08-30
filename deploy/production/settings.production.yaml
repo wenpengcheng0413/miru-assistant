@@ -1,0 +1,62 @@
+profile: cloud
+
+server:
+  host: 0.0.0.0
+  port: 8765
+  token: "${MIRU_SERVER_TOKEN}"
+  advertise_lan: false
+  cors_origins: []
+
+llm:
+  base_url: https://api.deepseek.com
+  api_key: "${MIRU_DEEPSEEK_API_KEY}"
+  model: deepseek-v4-flash
+  vision_model: deepseek-v4-flash
+  thinking: false
+  temperature: 0.7
+  max_tokens: 32768
+  short_max_tokens: 2048
+  timeout_s: 90
+  max_tool_rounds: 6
+
+stt:
+  engine: none
+
+tts:
+  provider: none
+
+memory:
+  auto_extract: true
+  history_max_chars: 16000
+  episodes_max_in_prompt: 5
+  summarize_at_rounds: 20
+
+persona:
+  default: miru
+  dir: ./config/persona
+
+tools:
+  enabled:
+    - get_current_time
+    - memory_set
+    - memory_get
+    - memory_list
+    - memory_delete
+    - memory_search
+    - api_cost_report
+    - api_budget_set
+
+db:
+  path: ./data/miru_server.db
+
+backup:
+  enabled: false
+  dir: ./data/backups
+  retention_days: 7
+
+attachments:
+  dir: ./data/attachments
+  max_file_mb: 10
+  max_images_per_turn: 4
+  max_preview_pages: 4
+  max_extracted_chars_per_turn: 20000

@@ -1,0 +1,110 @@
+name: miru-prod
+
+services:
+  miru-api:
+    image: ${MIRU_IMAGE_REF:?set MIRU_IMAGE_REF in the non-secret release env file}
+    user: "10001:10001"
+    environment:
+      MIRU_PROFILE: cloud
+      MIRU_SERVER_CONFIG: /app/config/settings.production.yaml
+      MIRU_BUILD_ID: ${MIRU_BUILD_ID:?set MIRU_BUILD_ID in the non-secret release env file}
+    entrypoint: ["/bin/sh"]
+    command:
+      - -ec
+      - |
+        test -r /run/secrets/server_token
+        test -r /run/secrets/deepseek_api_key
+        MIRU_SERVER_TOKEN="$$(cat /run/secrets/server_token)"
+        MIRU_DEEPSEEK_API_KEY="$$(cat /run/secrets/deepseek_api_key)"
+        test -n "$$MIRU_SERVER_TOKEN"
+        test -n "$$MIRU_DEEPSEEK_API_KEY"
+        export MIRU_SERVER_TOKEN MIRU_DEEPSEEK_API_KEY
+        exec python -m miru_server --profile cloud --host 0.0.0.0 --port 8765
+    volumes:
+      - type: bind
+        source: /opt/miru/data
+        target: /app/data
+      - type: bind
+        source: /opt/miru/secrets/server_token
+        target: /run/secrets/server_token
+        read_only: true
+      - type: bind
+        source: /opt/miru/secrets/deepseek_api_key
+        target: /run/secrets/deepseek_api_key
+        read_only: true
+      - type: bind
+        source: ./settings.production.yaml
+        target: /app/config/settings.production.yaml
+        read_only: true
+    expose:
+      - "8765"
+    networks: [miru-prod-network]
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 640m
+    memswap_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=2)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  caddy:
+    image: ${CADDY_IMAGE_REF:?set CADDY_IMAGE_REF in the non-secret release env file}
+    depends_on:
+      miru-api:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ./Caddyfile.production
+        target: /etc/caddy/Caddyfile
+        read_only: true
+    networks: [miru-prod-network]
+    ports:
+      - "127.0.0.1:18080:8080"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /config:size=8m,mode=0700
+      - /data:size=8m,mode=0700
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 96m
+    memswap_limit: 128m
+    cpus: 0.2
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+networks:
+  miru-prod-network:
+    name: miru-prod-network

@@ -1,12 +1,16 @@
 # Miru Server 配置模板 —— 复制为 settings.yaml 后修改（真实文件不入库）
 # 支持 ${ENV_VAR} 环境变量引用
 
+# development = Windows 本机兼容；cloud = Linux/云端基础能力；node 为未来 Home Node
+profile: development
+
 server:
   host: 127.0.0.1        # 默认只监听本机；局域网用 0.0.0.0；永远不要直接暴露公网
   port: 8765
   token: "${MIRU_SERVER_TOKEN}"   # 空 = 启动时随机生成（见 README）
   advertise_lan: true     # 用 Bonjour/mDNS 让手机自动发现电脑和端口
   service_name: Miru
+  cors_origins: []        # cloud 默认不开放浏览器跨域；按需显式填写来源
 
 llm:
   base_url: https://api.deepseek.com

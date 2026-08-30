@@ -1,0 +1,23 @@
+// Miru production tailnet policy - transitional stage 1.
+//
+// This defines the server tag while intentionally preserving the live default
+// access rules. Apply only long enough to tag miru-cloud, then replace with the
+// final least-privilege policy in tailscale-policy.production.hujson.
+{
+  "tagOwners": {
+    "tag:miru-cloud": ["autogroup:owner", "autogroup:admin"],
+  },
+
+  "grants": [
+    {"src": ["*"], "dst": ["*"], "ip": ["*"]},
+  ],
+
+  "ssh": [
+    {
+      "action": "check",
+      "src": ["autogroup:member"],
+      "dst": ["autogroup:self"],
+      "users": ["autogroup:nonroot", "root"],
+    },
+  ],
+}

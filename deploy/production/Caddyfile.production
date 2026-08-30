@@ -1,0 +1,21 @@
+{
+    auto_https off
+}
+
+:8080 {
+    @later_phase_paths path /api/wechat/* /api/debug/* /ws/node*
+    respond @later_phase_paths 404
+
+    request_body {
+        max_size 12MB
+    }
+
+    request_header -Tailscale-User-Login
+    request_header -Tailscale-User-Name
+    request_header -Tailscale-User-Profile-Pic
+    request_header -Tailscale-App-Capabilities
+
+    reverse_proxy miru-api:8765 {
+        flush_interval -1
+    }
+}

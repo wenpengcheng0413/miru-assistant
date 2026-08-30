@@ -15,11 +15,11 @@ flutter create --org com.miru --project-name miru_app miru_app_tmp
 # 3. 拉依赖
 cd miru_app_tmp && flutter pub get
 
-# 4. 改默认服务器地址（lib/core/config.dart 顶部常量，或在 App 设置页改）
+# 4. 开发环境可在 App 设置页填写地址；生产构建通过 dart-define 注入 Cloud 地址
 # 5. flutter run   （模拟器/真机调试）
 ```
 
-## iOS 必改配置（ios/Runner/Info.plist）
+## iOS 权限（ios/Runner/Info.plist）
 
 ```xml
 <key>NSMicrophoneUsageDescription</key>
@@ -28,17 +28,9 @@ cd miru_app_tmp && flutter pub get
 <string>Miru 需要相机来拍摄并分析图片</string>
 <key>NSPhotoLibraryUsageDescription</key>
 <string>Miru 需要访问照片以分析你选择的图片</string>
-<key>NSLocalNetworkUsageDescription</key>
-<string>Miru 需要连接你电脑上的后端服务</string>
-<key>NSBonjourServices</key>
-<array><string>_miru._tcp</string></array>
-<!-- 局域网 HTTP 调试用 ATS 例外；上 Tailscale/frp 走 HTTPS 后可移除 -->
-<key>NSAppTransportSecurity</key>
-<dict>
-  <key>NSAllowsLocalNetworking</key><true/>
-  <key>NSAllowsArbitraryLoads</key><true/>
-</dict>
 ```
+
+生产 Tailnet/Public Profile 不声明 Bonjour、本地网络权限或 ATS 明文例外。仅在开发壳工程确实需要局域网自动发现时添加这些开发权限。
 
 ## 自签部署（SideStore + LiveContainer，iOS 17）
 
@@ -46,10 +38,14 @@ cd miru_app_tmp && flutter pub get
 2. 按 SideStore/LiveContainer 流程签名安装（LiveContainer JIT-less 模式需与宿主同证书签名）
 3. 已知限制：无推送、无 App Extensions、7 天刷新一次；麦克风为普通权限，可用
 
-## 与后端连通的三种地址
+## Cloud Profile
 
-| 场景 | 设置页填写 |
-|------|-----------|
-| 同一 Wi-Fi 调试 | App 会自动发现 Miru；也可手填 `http://192.168.x.x:8765` |
-| 推荐：Tailscale | `https://<电脑名>.xxx.ts.net:8765`（真证书，无需 ATS 例外） |
-| 远期：frp+VPS | `https://miru.yourdomain.com` |
+生产 IPA 以以下构建参数固定 Cloud Profile；App Token 不进入构建参数或源码，首次安装后在设置页写入 Keychain：
+
+```bash
+flutter build ipa --release --no-codesign \
+  --dart-define=MIRU_DEPLOYMENT_PROFILE=tailnet \
+  --dart-define=MIRU_BASE_URL=https://<设备名>.<tailnet>.ts.net
+```
+
+`tailnet` 与 `public` Profile 强制 HTTPS/WSS 并禁用 Bonjour；只有 `development` Profile 允许局域网发现和 HTTP 调试。

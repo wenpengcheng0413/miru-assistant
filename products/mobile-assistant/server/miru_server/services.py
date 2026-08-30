@@ -75,11 +75,20 @@ def create_services(config: AppConfig) -> Services:
         )
 
     tts_provider, tts_fallback = None, None
-    try:
-        tts_provider = create_provider(config.tts)
-        tts_fallback = create_fallback_provider(config.tts)
-    except Exception as e:
-        logger.warning("TTS provider 初始化失败: %s", e)
+    # MiniMax is an optional voice capability. A cloud process with no
+    # provider credential stays fully usable for text chat and reports voice
+    # as unavailable instead of failing startup.
+    if config.is_cloud and config.tts.provider == "minimax" and not config.tts.minimax.api_key:
+        logger.info("TTS provider 未配置: error_code=provider_not_configured")
+    else:
+        try:
+            tts_provider = create_provider(config.tts)
+            tts_fallback = create_fallback_provider(config.tts)
+        except Exception as exc:
+            logger.warning(
+                "TTS provider 初始化失败: exception_type=%s",
+                type(exc).__name__,
+            )
 
     return Services(
         config=config,

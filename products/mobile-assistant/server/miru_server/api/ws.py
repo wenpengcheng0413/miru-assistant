@@ -19,6 +19,7 @@ from ..db.models import TurnTrace
 from ..stt.base import STTUnavailable
 from ..stt.vad import EnergyVAD
 from .deps import check_token
+from .rest import build_safe_status
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +216,7 @@ async def ws_session(websocket: WebSocket) -> None:
     await _safe_send(websocket, events.hello_ok(
         ctx.conversation_id, persona_name, ctx.tts_format, ctx.tts_sample_rate
     ))
+    await _safe_send(websocket, events.system_status(build_safe_status(services)))
     logger.info("会话建立: %s (mode=%s, persona=%s)", ctx.conversation_id, mode, persona_name)
 
     pipeline = AgentPipeline(services)

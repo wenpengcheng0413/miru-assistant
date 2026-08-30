@@ -2,26 +2,27 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import io
 import json
 import uuid
 import wave
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 
 from ..attachments import save_upload
 from ..db.models import ApiUsage, Attachment, Conversation, Message, TurnTrace
-from ..wechat_runtime import runtime_diagnostics, sync_snapshot, sync_status
+from ..wechat_runtime import sync_snapshot, sync_status
 from ..documents import extract as extract_document
 from ..stt.base import STTUnavailable
 from ..tts.base import VoiceConfig
 from .deps import verify_rest_token
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_rest_token)])
+public_router = APIRouter()
 
 
 def _svc(request: Request):
@@ -32,6 +33,7 @@ def _attachment_json(row: Attachment) -> dict:
     return {
         "id": row.id, "filename": row.filename, "media_type": row.media_type,
         "kind": row.kind, "size_bytes": row.size_bytes, "status": row.status,
+        "storage_key": row.storage_key,
         "error": row.error, "preview_count": len(json.loads(row.preview_paths or "[]")),
         "created_at": row.created_at.isoformat(),
     }
@@ -39,13 +41,92 @@ def _attachment_json(row: Attachment) -> dict:
 
 # ---------------------------------------------------------------- 健康与状态
 
+
+@public_router.get("/healthz")
+async def healthz() -> dict:
+    """Liveness probe: no services, files, providers, or Home Node checks."""
+    return {"status": "ok"}
+
+
+@public_router.get("/readyz")
+async def readyz(request: Request):
+    """Readiness probe for core config, SQLite, and service initialization only."""
+    services = getattr(request.app.state, "services", None)
+    if services is None:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "error_code": "services_not_initialized"},
+        )
+    checks = {
+        "config": bool(services.config.server.token and services.config.llm.api_key),
+        "sqlite": False,
+        "services": True,
+    }
+    try:
+        with services.db() as db:
+            db.execute(text("SELECT 1"))
+        checks["sqlite"] = True
+    except Exception:
+        checks["sqlite"] = False
+    ready = all(checks.values())
+    body = {"status": "ready" if ready else "not_ready", "checks": checks}
+    if not ready:
+        body["error_code"] = "core_not_ready"
+    return JSONResponse(status_code=200 if ready else 503, content=body)
+
+
+def build_safe_status(services) -> dict:
+    cfg = services.config
+    cloud_tools = services.tools.enabled_names
+    voice_available = services.tts_provider is not None
+    voice_reason = "" if voice_available else "provider_not_configured"
+    return {
+        "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cloud": {
+            "state": "ready",
+            "profile": cfg.profile,
+            "version": __import__("miru_server").__version__,
+        },
+        "home_node": {"state": "not_configured", "reason": "phase1_not_implemented"},
+        "capabilities": {
+            "chat": "available" if cfg.llm.api_key else "unavailable",
+            "streaming": "available" if cfg.llm.api_key else "unavailable",
+            "history": "available",
+            "memory": "available",
+            "persona": "available",
+            "cost": "available",
+            "cloud_tool": "available" if cloud_tools else "unavailable",
+            "attachments_metadata": "available",
+            "stt": "available" if services.stt.name != "none" else "unavailable",
+            "tts": "available" if voice_available else "unavailable",
+            "voice_reason": voice_reason,
+            "wechat": "unavailable",
+            "wechat_reason": "node_not_configured",
+            "gpu": "unavailable",
+            "gpu_reason": "node_not_configured",
+        },
+    }
+
+
+@router.get("/status")
+async def api_status(request: Request) -> dict:
+    """Authenticated, bounded capability status; never expose local paths/keys."""
+    return build_safe_status(_svc(request))
+
 @router.get("/health")
 async def health(request: Request):
     s = _svc(request)
-    wechat = await asyncio.to_thread(runtime_diagnostics, s.config)
+    # Kept as a compatibility endpoint for existing clients. It is now
+    # bounded and does not run WeChat diagnostics or expose local paths.
+    wechat = {
+        "available": False,
+        "error_code": "node_not_configured",
+        "reason": "Home Node is not configured",
+    }
     return {
         "status": "ok",
-        "build_id": wechat.get("build_id", "dev"),
+        "build_id": __import__("miru_server").__version__,
         "started_at": getattr(request.app.state, "started_at", None),
         "llm_model": s.config.llm.model,
         "vision_model": s.config.llm.vision_model,
@@ -55,6 +136,7 @@ async def health(request: Request):
         "wechat_image_analysis": "wechat_image_analysis" in s.tools.enabled_names,
         "wechat": wechat,
         "version": __import__("miru_server").__version__,
+        "profile": s.config.profile,
     }
 
 

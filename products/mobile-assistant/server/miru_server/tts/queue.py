@@ -83,7 +83,10 @@ class TTSQueue:
                 try:
                     nxt_audio = await prefetch
                 except Exception as e:
-                    logger.warning("TTS 预取失败: %s", e)
+                    logger.warning(
+                        "TTS 预取失败: exception_type=%s error_code=tts_prefetch_failed",
+                        type(e).__name__,
+                    )
                     nxt_audio = None
                 if nxt_audio is not None and nxt_audio[0] is not None:
                     await self._emit(nxt, nxt_audio)
@@ -102,7 +105,11 @@ class TTSQueue:
                 self._record_cost(self._provider.name, len(text))
             return audio, fmt, rate
         except Exception as e:
-            logger.warning("TTS 合成失败（%s）: %s，尝试兜底", self._provider.name, e)
+            logger.warning(
+                "TTS 合成失败: provider=%s exception_type=%s error_code=tts_failed，尝试兜底",
+                self._provider.name,
+                type(e).__name__,
+            )
             if self._fallback is not None:
                 try:
                     audio = await self._fallback.synthesize(text, self._voice)
@@ -111,7 +118,10 @@ class TTSQueue:
                         self._record_cost(self._fallback.name, len(text))
                     return audio, fmt, rate
                 except Exception as e2:
-                    logger.warning("兜底 TTS 也失败: %s", e2)
+                    logger.warning(
+                        "兜底 TTS 也失败: exception_type=%s error_code=tts_fallback_failed",
+                        type(e2).__name__,
+                    )
             return None, self._fmt, self._rate
 
     async def _emit(self, text: str, audio: tuple[bytes, str, int]) -> None:

@@ -1,0 +1,11 @@
+# Local-only Phase 2 proxy. No public domain, certificate, or Tailscale Serve.
+:8080 {
+    # A local client must never be able to forge identity headers. Tailscale
+    # Serve is a later phase and will be the only trusted identity source.
+    header -Tailscale-User-Login
+    header -Tailscale-User-Name
+    header -Tailscale-User-Profile-Picture
+    header -Tailscale-App-Capabilities
+
+    reverse_proxy miru-api:8765
+}

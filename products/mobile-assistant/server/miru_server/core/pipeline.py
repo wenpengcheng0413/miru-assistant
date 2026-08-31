@@ -350,6 +350,16 @@ class AgentPipeline:
                     await asyncio.to_thread(
                         self._save_tool_call, ctx.conversation_id, call, result
                     )
+                    if (
+                        call.name == "wechat_original_images"
+                        and result.ok
+                        and isinstance(result.data, dict)
+                    ):
+                        await self._send(
+                            ctx,
+                            "json",
+                            events.node_media(result.data.get("images", [])),
+                        )
                     await step(
                         "tool",
                         f"工具已完成：{call.name}",

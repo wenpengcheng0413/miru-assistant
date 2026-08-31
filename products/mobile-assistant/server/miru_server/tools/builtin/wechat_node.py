@@ -202,3 +202,75 @@ class WechatTranscribeVoiceNodeTool(Tool):
                 f"{data.get('transcribed', 0)}/{len(data.get('voice_messages', []))} 条"
             ),
         )
+
+
+class WechatOriginalImagesNodeTool(Tool):
+    name = "wechat_original_images"
+    description = (
+        "按需从 Windows Home Node 提取指定联系人或群聊的微信原图。"
+        "原图通过加密连接传到 Cloud 的短期媒体区，24 小时后自动过期；"
+        "返回可由 Miru App 鉴权显示的图片。用户要求照片、图片、截图或完整聊天媒体时使用。"
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "contact": {"type": "string", "description": "精确联系人备注、昵称或群名"},
+            "days": {"type": "integer", "minimum": 1, "maximum": 90, "default": 7},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 3, "default": 3},
+            "cursor": {"type": "string", "default": "", "description": "上一页 next_cursor"},
+        },
+        "required": ["contact"],
+        "additionalProperties": False,
+    }
+    execution_location = "node-home"
+    required_node = "node-home"
+    permissions = ("wechat.read.images",)
+    timeout_s = 120.0
+    max_result_chars = 10_000
+
+    async def run(
+        self,
+        ctx: ToolContext,
+        contact: str,
+        days: int = 7,
+        limit: int = 3,
+        cursor: str = "",
+    ) -> ToolResult:
+        args = {
+            "contact": contact,
+            "days": days,
+            "limit": limit,
+            "cursor": cursor,
+            "conversation_id": ctx.conversation_id,
+        }
+        try:
+            result = await ctx.services.node_rpc.execute(
+                self.name,
+                args,
+                timeout_s=self.timeout_s,
+                job_id=ctx.rpc_job_id or ctx.turn_id,
+            )
+        except NodeRpcError as exc:
+            return ToolResult.failure(
+                exc.message,
+                error_code=exc.error_code,
+                retryable=exc.retryable,
+            )
+        if result.get("ok") is not True:
+            return ToolResult.failure(
+                str(result.get("error") or "微信原图读取失败"),
+                error_code=str(result.get("error_code") or "wechat_image_failed"),
+                retryable=bool(result.get("retryable", False)),
+            )
+        data = result.get("data")
+        if not isinstance(data, dict):
+            return ToolResult.failure(
+                "Home Node 返回无效图片结果",
+                error_code="invalid_node_result",
+                retryable=False,
+            )
+        visible = [item for item in data.get("images", []) if item.get("download_path")]
+        return ToolResult.success(
+            data,
+            summary=f"已提取并临时提供微信原图 {len(visible)} 张（24 小时有效）",
+        )

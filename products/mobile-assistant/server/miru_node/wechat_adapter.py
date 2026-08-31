@@ -81,6 +81,15 @@ def _voice_extractor_class():
     return VoiceExtractor
 
 
+def _image_extractor_class():
+    _reader_class()
+    try:
+        from miru.chat_analyzer.media.image import ImageExtractor
+    except Exception as exc:
+        raise WeChatAdapterError("wechat_image_dependency_missing", "微信图片解密组件不可用") from exc
+    return ImageExtractor
+
+
 def _sensevoice_engine(model_dir: str):
     with _STT_LOCK:
         engine = _STT_ENGINES.get(model_dir)
@@ -115,6 +124,14 @@ def _clean_content(value: Any, max_chars: int = 300) -> str:
     return content[:max_chars] + ("…" if len(content) > max_chars else "")
 
 
+def _image_md5(value: Any) -> str:
+    raw = str(value or "")
+    match = re.search(r"(?:cdnmidimgurl|md5|cdnthumburl)=['\"][^'\"]*?([a-fA-F0-9]{32})", raw)
+    if not match:
+        match = re.search(r"\b([a-fA-F0-9]{32})\b", raw)
+    return match.group(1).lower() if match else ""
+
+
 class WeChatNodeAdapter:
     def __init__(
         self,
@@ -122,6 +139,7 @@ class WeChatNodeAdapter:
         *,
         reader_factory: Callable[[str], Any] | None = None,
         voice_extractor_factory: Callable[[Any], Any] | None = None,
+        image_extractor_factory: Callable[[Any], Any] | None = None,
         stt_factory: Callable[[str], Any] | None = None,
         stt_model_dir: str = "./data/models/sensevoice",
         max_days: int = 90,
@@ -130,6 +148,7 @@ class WeChatNodeAdapter:
         self.data_root = data_root
         self.reader_factory = reader_factory
         self.voice_extractor_factory = voice_extractor_factory
+        self.image_extractor_factory = image_extractor_factory
         self.stt_factory = stt_factory
         self.stt_model_dir = stt_model_dir
         self.max_days = max(1, min(int(max_days), 90))
@@ -433,6 +452,110 @@ class WeChatNodeAdapter:
                 "days": days,
                 "voice_messages": rows,
                 "transcribed": sum(bool(item["transcript"]) for item in rows),
+                "has_more": has_more,
+                "next_cursor": (
+                    self._encode_cursor(consumed, contact=scope_contact, days=days)
+                    if has_more
+                    else ""
+                ),
+            }
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+    def extract_original_images(
+        self,
+        *,
+        contact: str,
+        days: int = 7,
+        limit: int = 3,
+        cursor: str = "",
+    ) -> dict:
+        """Decrypt a bounded image page locally; bytes stay private to the node client."""
+        contact = str(contact or "").strip()
+        if not (1 <= len(contact) <= 80):
+            raise WeChatAdapterError("invalid_tool_arguments", "联系人或群聊格式无效")
+        days = max(1, min(int(days), self.max_days))
+        limit = max(1, min(int(limit), 3))
+        scope_contact = f"image:{contact}"
+        offset = self._decode_cursor(str(cursor or ""), contact=scope_contact, days=days)
+        db = self._open()
+        try:
+            resolved = self._exact_contact(db, contact, allow_group=True)
+            username = str(resolved["username"])
+            is_group = username.endswith("@chatroom")
+            images = [
+                item for item in self._read_window(db, username, days)
+                if int(getattr(item, "msg_type", 0) or 0) == 3
+            ]
+            end = max(0, len(images) - offset)
+            start = max(0, end - limit)
+            page = images[start:end]
+            extractor_cls = self.image_extractor_factory or _image_extractor_class()
+            try:
+                extractor = extractor_cls(getattr(db, "account_dir"))
+            except Exception as exc:
+                raise WeChatAdapterError("wechat_image_unavailable", "本机微信原图读取不可用") from exc
+            rows = []
+            for item in page:
+                timestamp = int(getattr(item, "timestamp", 0))
+                md5 = _image_md5(getattr(item, "content", "")) or _image_md5(
+                    getattr(item, "raw_content", "")
+                )
+                row = {
+                    "time": datetime.fromtimestamp(timestamp, timezone.utc).isoformat(),
+                    "sender": self._sender_label(item, username=username, is_group=is_group),
+                    "media_type": "",
+                    "size_bytes": 0,
+                    "match": "",
+                    "error": "",
+                    "_bytes": b"",
+                    "_extension": "",
+                }
+                if not md5:
+                    row["error"] = "image_reference_missing"
+                    rows.append(row)
+                    continue
+                try:
+                    candidates = extractor.locate_files(username, timestamp, md5)
+                    exact = [
+                        path for path in candidates
+                        if path.stem == md5 or path.stem.startswith(f"{md5}_")
+                    ]
+                    exact.sort(key=lambda path: 0 if path.stem.endswith("_h") else 1)
+                    selected = exact[0] if exact else extractor.pick_by_time(
+                        candidates,
+                        timestamp,
+                        window_s=3600,
+                    )
+                    data = extractor.decrypt(selected) if selected else None
+                    extension = extractor.sniff_format(data or b"") if data else ""
+                    row["match"] = "md5_exact" if exact else (
+                        "time_nearest_1h" if selected else ""
+                    )
+                except Exception:
+                    data, extension = None, ""
+                if not data:
+                    row["error"] = "image_decrypt_failed"
+                elif extension not in {"jpg", "png", "gif", "webp"}:
+                    row["error"] = "image_format_not_displayable"
+                elif len(data) > 10 * 1024 * 1024:
+                    row["error"] = "image_too_large"
+                else:
+                    row["media_type"] = "image/jpeg" if extension == "jpg" else f"image/{extension}"
+                    row["size_bytes"] = len(data)
+                    row["_bytes"] = data
+                    row["_extension"] = f".{extension}"
+                rows.append(row)
+            consumed = offset + len(page)
+            has_more = start > 0
+            return {
+                "contact": contact,
+                "conversation_type": "group" if is_group else "direct",
+                "days": days,
+                "images": rows,
                 "has_more": has_more,
                 "next_cursor": (
                     self._encode_cursor(consumed, contact=scope_contact, days=days)

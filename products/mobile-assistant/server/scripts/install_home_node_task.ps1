@@ -24,6 +24,7 @@ journal_path: "$($journalPath.Replace('\', '\\'))"
 capabilities:
   - home_node_ping
   - wechat_conversation_messages
+  - wechat_original_images
   - wechat_search_messages
   - wechat_transcribe_voice
 wechat_data_root: ""

@@ -17,6 +17,7 @@ from miru_server.main import create_app
 from miru_server.tools.base import ToolContext
 from miru_server.tools.builtin.wechat_node import (
     WechatConversationMessagesNodeTool,
+    WechatOriginalImagesNodeTool,
     WechatSearchMessagesNodeTool,
     WechatTranscribeVoiceNodeTool,
 )
@@ -28,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 class _FakeReader:
     def __init__(self, _root: str):
         self.closed = False
+        self.account_dir = "fake-account"
 
     def get_contacts(self):
         return [
@@ -73,6 +75,7 @@ class _FakeReader:
                     sender="wxid_must_not_leak",
                     msg_type=3,
                     content="[图片]",
+                    raw_content="<img md5='0123456789abcdef0123456789abcdef'/>",
                 ),
                 SimpleNamespace(
                     timestamp=1_800_000_006,
@@ -132,6 +135,20 @@ class _FakeStt:
         assert pcm
         assert sample_rate == 16000
         return "本机转写结果"
+
+
+class _FakeImageExtractor:
+    def __init__(self, _account_dir):
+        pass
+
+    def locate_files(self, _username, _timestamp, md5):
+        return [Path(f"{md5}_h.dat")]
+
+    def decrypt(self, _path):
+        return b"\xff\xd8\xff" + b"image-bytes"
+
+    def sniff_format(self, _data):
+        return "jpg"
 
 
 def test_wechat_adapter_is_exact_bounded_and_value_scoped():
@@ -225,6 +242,19 @@ def test_wechat_voice_is_transcribed_locally_without_raw_media_or_ids():
     assert "wxid" not in encoded
 
 
+def test_wechat_original_image_extracts_only_exact_reference():
+    adapter = WeChatNodeAdapter(
+        reader_factory=_FakeReader,
+        image_extractor_factory=_FakeImageExtractor,
+    )
+    result = adapter.extract_original_images(contact="Test Group", days=30, limit=3)
+    assert len(result["images"]) == 1
+    image = result["images"][0]
+    assert image["media_type"] == "image/jpeg"
+    assert image["_bytes"].startswith(b"\xff\xd8\xff")
+    assert image["_extension"] == ".jpg"
+
+
 @pytest.mark.asyncio
 async def test_node_client_executes_only_allowlisted_wechat_search(tmp_path, monkeypatch):
     config = NodeClientConfig(
@@ -236,6 +266,7 @@ async def test_node_client_executes_only_allowlisted_wechat_search(tmp_path, mon
             "wechat_conversation_messages",
             "wechat_search_messages",
             "wechat_transcribe_voice",
+            "wechat_original_images",
         ],
     )
     client = HomeNodeClient(config)
@@ -271,6 +302,45 @@ async def test_node_client_executes_only_allowlisted_wechat_search(tmp_path, mon
         "args": {"contact": "Test Group", "days": 7, "limit": 1, "cursor": ""},
     })
     assert voice["ok"] is True
+    monkeypatch.setattr(
+        WeChatNodeAdapter,
+        "extract_original_images",
+        lambda self, **kwargs: {
+            "images": [{
+                "time": "2026-08-31T00:00:00+00:00",
+                "sender": "self",
+                "media_type": "image/jpeg",
+                "size_bytes": 10,
+                "error": "",
+                "_bytes": b"private-image",
+                "_extension": ".jpg",
+            }],
+            **kwargs,
+        },
+    )
+    monkeypatch.setattr(
+        client,
+        "_upload_node_media",
+        lambda *args, **kwargs: {
+            "id": "a" * 32,
+            "download_path": "/api/node-media/" + "a" * 32,
+            "expires_at": "2026-09-01T00:00:00+00:00",
+        },
+    )
+    media = await client._run_job({
+        "tool": "wechat_original_images",
+        "args": {
+            "contact": "Test Group",
+            "days": 7,
+            "limit": 1,
+            "cursor": "",
+            "conversation_id": "conversation-1",
+        },
+    })
+    assert media["ok"] is True
+    assert media["data"]["images"][0]["download_path"].startswith("/api/node-media/")
+    assert all("_bytes" not in item for item in media["data"]["images"])
+    assert "private-image" not in str(media)
     denied = await client._run_job({"tool": "wechat_recent_messages", "args": {}})
     assert denied["error_code"] == "node_capability_unavailable"
 
@@ -366,7 +436,9 @@ def test_phase8_production_allowlist_contains_only_read_capability():
     assert "wechat_max_days: 90" in installer
     assert "wechat_max_results: 20" in installer
     assert settings.count("- wechat_transcribe_voice") == 2
+    assert settings.count("- wechat_original_images") == 2
     assert "  - wechat_transcribe_voice" in installer
+    assert "  - wechat_original_images" in installer
     assert "wechat_stt_model_dir: \"./data/models/sensevoice\"" in installer
     for forbidden in ["wechat_recent_messages", "wechat_image_analysis"]:
         assert f"  - {forbidden}" not in installer
@@ -409,3 +481,60 @@ def test_status_marks_underscore_wechat_capability_available(app_config):
                 "/api/status", headers={"Authorization": "Bearer test-token"}
             ).json()
             assert status["capabilities"]["wechat"] == "available"
+
+
+def test_node_media_relay_is_separately_authenticated_and_downloadable(app_config, tmp_path):
+    values = app_config.model_dump()
+    values["profile"] = "cloud"
+    values["server"]["token"] = "app-test-token"
+    values["llm"]["api_key"] = "test-key"
+    values["stt"]["engine"] = "none"
+    values["attachments"]["dir"] = str(tmp_path / "attachments")
+    values["tools"]["enabled"] = ["wechat_original_images"]
+    values["home_node"] = {
+        "enabled": True,
+        "node_id": "node-home",
+        "token": "node-test-token-with-at-least-32-characters",
+        "allowed_capabilities": ["wechat_original_images"],
+        "heartbeat_interval_s": 20,
+        "stale_after_s": 30,
+        "offline_after_s": 60,
+    }
+    cfg = type(app_config).model_validate(values)
+    app_headers = {"Authorization": "Bearer app-test-token"}
+    node_headers = {"Authorization": "Bearer node-test-token-with-at-least-32-characters"}
+    with TestClient(create_app(cfg)) as client:
+        conversation_id = client.post(
+            "/api/conversations", json={"persona": "miru"}, headers=app_headers
+        ).json()["id"]
+        denied = client.post(
+            "/api/node/media",
+            content=b"\xff\xd8\xffprivate",
+            headers={
+                "Authorization": "Bearer wrong",
+                "X-Miru-Conversation-Id": conversation_id,
+                "X-Miru-Image-Ext": ".jpg",
+            },
+        )
+        assert denied.status_code == 401
+        uploaded = client.post(
+            "/api/node/media",
+            content=b"\xff\xd8\xffprivate",
+            headers={
+                **node_headers,
+                "X-Miru-Conversation-Id": conversation_id,
+                "X-Miru-Image-Ext": ".jpg",
+            },
+        )
+        assert uploaded.status_code == 200
+        media = uploaded.json()
+        assert media["download_path"].startswith("/api/node-media/")
+        assert "sha256" not in media
+        assert client.get(media["download_path"]).status_code == 401
+        downloaded = client.get(media["download_path"], headers=app_headers)
+        assert downloaded.status_code == 200
+        assert downloaded.content == b"\xff\xd8\xffprivate"
+        listed = client.get(
+            f"/api/conversations/{conversation_id}/node-media", headers=app_headers
+        ).json()["items"]
+        assert len(listed) == 1

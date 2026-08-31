@@ -103,6 +103,19 @@ def tool_end(
     return event(payload)
 
 
+def node_media(items: list[dict]) -> dict:
+    """Short-lived authenticated media emitted separately from LLM text."""
+    safe = []
+    for item in items[:3]:
+        if not isinstance(item, dict) or not str(item.get("download_path") or "").startswith("/api/node-media/"):
+            continue
+        safe.append({key: item.get(key) for key in (
+            "id", "download_path", "media_type", "size_bytes", "sender",
+            "message_time", "expires_at",
+        )})
+    return event({"type": "node_media", "items": safe})
+
+
 def turn_end(
     usage: dict,
     cost_rmb: float,

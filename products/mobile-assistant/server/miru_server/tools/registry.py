@@ -163,6 +163,7 @@ def build_registry(config: Any) -> ToolRegistry:
     if profile == "cloud":
         from .builtin.wechat_node import (
             WechatConversationMessagesNodeTool,
+            WechatOriginalImagesNodeTool,
             WechatSearchMessagesNodeTool,
             WechatTranscribeVoiceNodeTool,
         )
@@ -171,6 +172,7 @@ def build_registry(config: Any) -> ToolRegistry:
             WechatSearchMessagesNodeTool,
             WechatConversationMessagesNodeTool,
             WechatTranscribeVoiceNodeTool,
+            WechatOriginalImagesNodeTool,
         ])
     else:
         from .builtin.wechat import (

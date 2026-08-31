@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import random
+import urllib.request
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import websockets
 
@@ -28,9 +31,11 @@ class HomeNodeClient:
         self.config = config
         self.instance_id = str(uuid.uuid4())
         self.journal = JobJournal(config.journal_path)
+        self._device_token = ""
 
     async def connect_once(self) -> None:
         token = load_token(self.config.token_path)
+        self._device_token = token
         async with websockets.connect(
             self.config.cloud_url,
             open_timeout=self.config.connect_timeout_s,
@@ -140,6 +145,7 @@ class HomeNodeClient:
             "wechat_search_messages",
             "wechat_conversation_messages",
             "wechat_transcribe_voice",
+            "wechat_original_images",
         }:
             if not isinstance(args, dict):
                 return self._failure("invalid_tool_arguments", "微信搜索参数无效", False)
@@ -156,8 +162,33 @@ class HomeNodeClient:
                     "wechat_search_messages": adapter.search_messages,
                     "wechat_conversation_messages": adapter.conversation_messages,
                     "wechat_transcribe_voice": adapter.transcribe_voice,
+                    "wechat_original_images": adapter.extract_original_images,
                 }[tool]
-                data = await asyncio.to_thread(method, **args)
+                call_args = dict(args)
+                conversation_id = str(call_args.pop("conversation_id", ""))
+                if tool == "wechat_original_images" and not conversation_id:
+                    return self._failure("invalid_tool_arguments", "缺少媒体目标会话", False)
+                data = await asyncio.to_thread(method, **call_args)
+                if tool == "wechat_original_images":
+                    uploaded = []
+                    for row in data.get("images", []):
+                        image_bytes = row.pop("_bytes", b"")
+                        extension = row.pop("_extension", "")
+                        if image_bytes:
+                            try:
+                                remote = await asyncio.to_thread(
+                                    self._upload_node_media,
+                                    image_bytes,
+                                    extension=extension,
+                                    conversation_id=conversation_id,
+                                    message_time=str(row.get("time") or ""),
+                                    sender=str(row.get("sender") or ""),
+                                )
+                                row.update(remote)
+                            except Exception:
+                                row["error"] = "media_upload_failed"
+                        uploaded.append(row)
+                    data["images"] = uploaded
             except WeChatAdapterError as exc:
                 return self._failure(exc.error_code, exc.message, exc.retryable)
             except (TypeError, ValueError):
@@ -166,6 +197,50 @@ class HomeNodeClient:
                 return self._failure("wechat_read_failed", "微信消息读取失败", False)
             return {"ok": True, "data": data}
         return self._failure("node_capability_unavailable", "节点能力未启用", False)
+
+    def _upload_node_media(
+        self,
+        data: bytes,
+        *,
+        extension: str,
+        conversation_id: str,
+        message_time: str,
+        sender: str,
+    ) -> dict:
+        if not data or len(data) > 10 * 1024 * 1024:
+            raise ValueError("invalid media size")
+        if not self._device_token:
+            raise RuntimeError("node token unavailable")
+        parsed = urlparse(self.config.cloud_url)
+        upload_url = parsed._replace(
+            scheme="https",
+            path="/api/node/media",
+            params="",
+            query="",
+            fragment="",
+        ).geturl()
+        encoded_sender = base64.urlsafe_b64encode(sender.encode("utf-8")[:240]).decode("ascii").rstrip("=")
+        request = urllib.request.Request(
+            upload_url,
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self._device_token}",
+                "Content-Type": "application/octet-stream",
+                "X-Miru-Conversation-Id": conversation_id,
+                "X-Miru-Image-Ext": extension,
+                "X-Miru-Message-Time": message_time[:40],
+                "X-Miru-Sender": encoded_sender,
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            raw = response.read(8193)
+        if len(raw) > 8192:
+            raise ValueError("media response too large")
+        payload = json.loads(raw)
+        if not isinstance(payload, dict) or not payload.get("download_path"):
+            raise ValueError("invalid media response")
+        return payload
 
     async def _finish_job(self, websocket, jobs: dict, job_id: str, task: asyncio.Task) -> None:
         jobs.pop(job_id, None)

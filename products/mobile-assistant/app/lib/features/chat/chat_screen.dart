@@ -345,10 +345,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: SelectableText(
-                    line.text,
-                    style: const TextStyle(fontSize: 15),
-                  ),
+                  child: line.text.isEmpty
+                      ? const SizedBox.shrink()
+                      : SelectableText(
+                          line.text,
+                          style: const TextStyle(fontSize: 15),
+                        ),
                 ),
                 if (isUser || line.kind == 'miru')
                   IconButton(
@@ -360,6 +362,56 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
               ],
             ),
+            if (line.images.isNotEmpty)
+              ...line.images.map(
+                (item) => Padding(
+                  padding: const EdgeInsets.only(top: 8, right: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.network(
+                          '${c.config.restBaseUrl}${item.downloadPath}',
+                          headers: {
+                            'Authorization': 'Bearer ${c.config.token}',
+                          },
+                          fit: BoxFit.contain,
+                          loadingBuilder: (context, child, progress) =>
+                              progress == null
+                                  ? child
+                                  : const SizedBox(
+                                      height: 120,
+                                      child: Center(
+                                        child: CircularProgressIndicator(),
+                                      ),
+                                    ),
+                          errorBuilder: (context, error, stackTrace) =>
+                              const SizedBox(
+                            height: 90,
+                            child: Center(
+                              child: Text('原图已过期或暂时无法加载'),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (item.sender.isNotEmpty || item.messageTime.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            [item.sender, item.messageTime]
+                                .where((value) => value.isNotEmpty)
+                                .join(' · '),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             if (line.kind == 'miru' && line.steps.isNotEmpty)
               _processPanel(
                 line.steps,

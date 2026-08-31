@@ -22,7 +22,9 @@ class ChatLine {
     this.turnId = '',
     this.stats,
     List<ProcessStep>? steps,
-  }) : steps = steps ?? <ProcessStep>[];
+    List<RemoteImage>? images,
+  })  : steps = steps ?? <ProcessStep>[],
+        images = images ?? <RemoteImage>[];
 
   final String kind; // user / miru / note
   final String text;
@@ -30,7 +32,35 @@ class ChatLine {
   final String turnId;
   final TurnStats? stats;
   final List<ProcessStep> steps;
+  final List<RemoteImage> images;
   bool processExpanded = false;
+}
+
+class RemoteImage {
+  RemoteImage({
+    required this.id,
+    required this.downloadPath,
+    required this.mediaType,
+    required this.sender,
+    required this.messageTime,
+    required this.expiresAt,
+  });
+
+  final String id;
+  final String downloadPath;
+  final String mediaType;
+  final String sender;
+  final String messageTime;
+  final String expiresAt;
+
+  factory RemoteImage.fromJson(Map<dynamic, dynamic> json) => RemoteImage(
+        id: json['id'] as String? ?? '',
+        downloadPath: json['download_path'] as String? ?? '',
+        mediaType: json['media_type'] as String? ?? 'image/jpeg',
+        sender: json['sender'] as String? ?? '',
+        messageTime: json['message_time'] as String? ?? '',
+        expiresAt: json['expires_at'] as String? ?? '',
+      );
 }
 
 class ProcessStep {
@@ -393,6 +423,25 @@ class ChatController extends ChangeNotifier {
           );
         }
       }
+      try {
+        final mediaResponse = await dio.get(
+          '${config.restBaseUrl}/api/conversations/$conversationId/node-media',
+          options:
+              Options(headers: {'Authorization': 'Bearer ${config.token}'}),
+        );
+        final mediaRows =
+            (mediaResponse.data as Map?)?['items'] as List? ?? const [];
+        final images = mediaRows
+            .whereType<Map>()
+            .map(RemoteImage.fromJson)
+            .where((item) => item.id.isNotEmpty && item.downloadPath.isNotEmpty)
+            .toList();
+        if (images.isNotEmpty) {
+          history.add(ChatLine('media', '微信原图（24 小时有效）', images: images));
+        }
+      } catch (_) {
+        // 短期媒体恢复失败不影响文字历史。
+      }
       if (history.isEmpty) return;
 
       // 如果加载期间用户已经说话，保留这些新行并去重，避免历史消息被插到最下面
@@ -678,6 +727,16 @@ class ChatController extends ChangeNotifier {
         final toolError = e['error'] as String? ?? '';
         if (toolError.isNotEmpty) {
           progressStatus = '工具失败：$toolError';
+        }
+        notifyListeners();
+      case 'node_media':
+        final items = (e['items'] as List? ?? const [])
+            .whereType<Map>()
+            .map(RemoteImage.fromJson)
+            .where((item) => item.id.isNotEmpty && item.downloadPath.isNotEmpty)
+            .toList();
+        if (items.isNotEmpty) {
+          lines.add(ChatLine('media', '微信原图（24 小时有效）', images: items));
         }
         notifyListeners();
       case 'turn_end':

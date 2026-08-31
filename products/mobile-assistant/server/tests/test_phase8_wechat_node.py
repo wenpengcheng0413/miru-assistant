@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
 
 from miru_node.client import HomeNodeClient
 from miru_node.config import NodeClientConfig
@@ -12,6 +13,7 @@ from miru_node.wechat_adapter import WeChatAdapterError, WeChatNodeAdapter
 from miru_server.config import HomeNodeConfig
 from miru_server.node_registry import HomeNodeRegistry
 from miru_server.node_rpc import HomeNodeRpc
+from miru_server.main import create_app
 from miru_server.tools.base import ToolContext
 from miru_server.tools.builtin.wechat_node import WechatSearchMessagesNodeTool
 from miru_server.tools.registry import ToolRegistry
@@ -188,5 +190,41 @@ def test_phase8_production_allowlist_contains_only_read_capability():
     for forbidden in ["wechat_recent_messages", "wechat_transcribe_voice", "wechat_image_analysis"]:
         assert f"  - {forbidden}" not in installer
     assert "miru_server/config.py" in dockerfile
+    assert "miru_server/api/rest.py" in dockerfile
     assert "miru_server/tools/registry.py" in dockerfile
     assert "miru_server/tools/builtin/wechat_node.py" in dockerfile
+
+
+def test_status_marks_underscore_wechat_capability_available(app_config):
+    values = app_config.model_dump()
+    values["profile"] = "cloud"
+    values["server"]["token"] = "test-token"
+    values["llm"]["api_key"] = "test-key"
+    values["stt"]["engine"] = "none"
+    values["tools"]["enabled"] = ["wechat_search_messages"]
+    values["home_node"] = {
+        "enabled": True,
+        "node_id": "node-home",
+        "token": "node-test-token-with-at-least-32-characters",
+        "allowed_capabilities": ["wechat_search_messages"],
+        "heartbeat_interval_s": 20,
+        "stale_after_s": 30,
+        "offline_after_s": 60,
+    }
+    cfg = type(app_config).model_validate(values)
+    with TestClient(create_app(cfg)) as client:
+        with client.websocket_connect("/ws/node") as websocket:
+            websocket.send_json({
+                "type": "node.hello",
+                "protocol_version": 1,
+                "node_id": "node-home",
+                "device_token": "node-test-token-with-at-least-32-characters",
+                "client_instance_id": "phase8-instance",
+                "capabilities": ["wechat_search_messages"],
+                "last_completed_job_ids": [],
+            })
+            assert websocket.receive_json()["type"] == "node.welcome"
+            status = client.get(
+                "/api/status", headers={"Authorization": "Bearer test-token"}
+            ).json()
+            assert status["capabilities"]["wechat"] == "available"

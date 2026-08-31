@@ -84,7 +84,7 @@ def build_safe_status(services) -> dict:
     node_online = node.state == "online"
     node_capabilities = set(node.capabilities)
     wechat_available = node_online and any(
-        item.startswith("wechat.") for item in node_capabilities
+        item.startswith(("wechat.", "wechat_")) for item in node_capabilities
     )
     gpu_available = node_online and any(
         item.startswith("gpu.") for item in node_capabilities

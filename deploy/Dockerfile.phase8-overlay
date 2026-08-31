@@ -2,5 +2,6 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 COPY --chown=miru:miru server/miru_server/config.py /app/miru_server/config.py
+COPY --chown=miru:miru server/miru_server/api/rest.py /app/miru_server/api/rest.py
 COPY --chown=miru:miru server/miru_server/tools/registry.py /app/miru_server/tools/registry.py
 COPY --chown=miru:miru server/miru_server/tools/builtin/wechat_node.py /app/miru_server/tools/builtin/wechat_node.py

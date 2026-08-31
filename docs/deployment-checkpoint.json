@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-31T11:16:06+08:00",
+  "updated_at": "2026-08-31T12:55:00+08:00",
   "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
   "git": {
     "branch": "master",
@@ -11,14 +11,18 @@
     "phase7_implementation_commit": "fe30d3c869409c761f69e2c842acc26ff751e380",
     "phase8_implementation_commit": "96620b7738aa03e1c6fc9b8f5a6e12b13efdca82",
     "phase8_status_fix_commit": "fca4b1ad2b6358eb0603ff4818d08a9f585db93e",
-    "push_state": "phase6_through_phase8_commits_local; origin master push awaiting explicit authorization",
+    "phase8_conversation_paging_commit": "2233c5a",
+    "phase9_voice_transcription_commit": "ad77988",
+    "phase9_original_image_relay_commit": "8cfd6ca",
+    "phase9_media_overlay_commit": "84d3722",
+    "push_state": "phase6_through_phase9_commits local; origin master push awaiting explicit authorization",
     "dirty_worktree_preserved": true
   },
   "production": {
     "state": "healthy",
-    "active_release": "p8r1-20260831-0916-fca4b1a-b19a035e",
-    "rollback_release": "p8-20260831-0911-96620b7-20b3f8ae",
-    "last_fully_accepted_release": "p7-20260831-0849-fe30d3c-f539332e",
+    "active_release": "p9m1-20260831-1238-84d3722-61a2bf90",
+    "rollback_release": "p8v1-20260831-1219-ad77988-5d3a918c",
+    "last_fully_accepted_release": "p8r1-20260831-0916-fca4b1a-b19a035e",
     "access": "tailscale-private-https-wss",
     "funnel": "off",
     "public_business_ports": "none"
@@ -106,14 +110,32 @@
         "production activation, status correction, backup, health, and rollback",
         "real unknown-contact negative RPC and synthetic conversation cleanup",
         "Cloud and node log sensitive-marker scans"
+        ,"physical iPhone real-contact keyword-search acceptance"
+        ,"bounded exact contact and group conversation paging"
+        ,"cursor-bound older-message retrieval"
       ],
       "pending_gates": [
-        "physical iPhone real-contact keyword-search acceptance",
-        "bounded contact lookup, recent messages, and statistics",
+        "physical iPhone contact/group conversation-page acceptance",
         "explicit decision and acceptance for optional scheme-B summary synchronization"
       ]
     },
-    "9": "pending",
+    "9": {
+      "state": "in_progress",
+      "completed_gates": [
+        "local WeChat SILK decode and SenseVoice transcription with text-only Cloud result",
+        "real local voice transcription without content output in evidence",
+        "short-lived authenticated Home Node original-image relay",
+        "24-hour media expiry with App Bearer download authentication",
+        "real local original-image decrypt and format validation",
+        "production release health, database integrity, capability handshake, and negative RPC tests",
+        "Flutter format and analyze: no issues"
+      ],
+      "pending_gates": [
+        "explicit authorization to push local commits to origin master",
+        "Codemagic iOS build and artifact verification",
+        "physical iPhone voice transcript and original-image display acceptance"
+      ]
+    },
     "10": "pending"
   },
   "ci": {
@@ -128,8 +150,8 @@
     "artifact_version": "0.3.0+3",
     "artifact_sha256": "8805CCBEE0FDDDC52B35F1DE4556926EA5B4A36A8FF8E5EEC230105CB72893F0"
   },
-  "human_gate": "On the physical iPhone, call wechat_search_messages with one real exact contact and a known keyword; the contact and keyword do not need to be disclosed in evidence.",
-  "next_action": "complete the physical positive WeChat search gate, then extend the same privacy boundary to bounded contact lookup, recent messages, and statistics",
+  "human_gate": "Authorize pushing the committed Phase 8/9 changes to origin master so Codemagic can build the updated iOS client.",
+  "next_action": "after explicit push authorization, push origin master, verify Codemagic build, install the new IPA, and run physical contact/group, voice, and original-image acceptance",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,
@@ -177,7 +199,19 @@
     "accepted_capabilities": ["home_node_ping", "wechat_search_messages"],
     "wechat_status": "available",
     "automated_minimum_slice": "passed",
-    "physical_positive_search": "pending"
+    "physical_positive_search": "passed",
+    "conversation_paging": "automated_pass_physical_pending"
   },
-  "evidence_root": "docs/evidence/phase8/p8r1-20260831-0916-fca4b1a-b19a035e"
+  "phase9": {
+    "release_archive_sha256": "bc6dad8386c7cd5fed254d401179cb7c3fa6a836368df3758f8e4eff65246945",
+    "image_id": "sha256:3798ff46c78464543d937ceef517ae98125aaa843e71feaf198ee5babba1cd04",
+    "pre_activation_database_sha256": "b88e316a848e724355779cf62fbdc603de74abb857118cfa45768fafb8678b66",
+    "home_node_state": "online",
+    "accepted_capabilities": ["home_node_ping", "wechat_conversation_messages", "wechat_original_images", "wechat_search_messages", "wechat_transcribe_voice"],
+    "automated_backend_verification": "passed",
+    "flutter_analyze": "passed",
+    "codemagic_build": "pending_push_authorization",
+    "physical_app_acceptance": "pending"
+  },
+  "evidence_root": "docs/evidence/phase9/p9m1-20260831-1238-84d3722-61a2bf90"
 }

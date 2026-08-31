@@ -1,0 +1,73 @@
+Miru Phase 8 expansion and Phase 9 media verification
+Recorded: 2026-08-31 12:55 CST
+
+SOURCE
+conversation_paging_commit=2233c5a
+voice_transcription_commit=ad77988
+original_image_relay_commit=8cfd6ca
+media_overlay_commit=84d3722
+git_push=not_performed; explicit default-branch authorization required
+
+AUTOMATED VERIFICATION
+server_regression=117 passed, 1 skipped
+dpapi_skip_reason=sandbox-only; real Windows DPAPI previously passed
+flutter_format=passed
+flutter_analyze=no issues found
+flutter_test_local=blocked by Windows native-assets hook path-with-spaces issue
+candidate_synthetic_media_upload=true
+candidate_authenticated_media_download=true
+
+REAL WINDOWS DIAGNOSTICS
+group_conversation_page=true
+group_page_rows=2
+voice_conversation_found=true
+voice_page_rows=1
+voice_transcribed_locally=1
+voice_raw_media_fields_absent=true
+image_conversation_found=true
+displayable_original_decrypted=true
+image_within_10mb=true
+contact_names_printed=false
+message_text_or_transcript_printed=false
+image_bytes_printed_or_uploaded_during_diagnostic=false
+
+PRIVACY AND BOUNDS
+raw_wechat_database_upload=false
+database_key_upload=false
+voice_processing=local Home Node only
+voice_result=text only
+original_image_transport=outbound Home Node HTTPS upload with separate Node Token
+original_image_download=App Bearer Token required
+original_image_ttl_hours=24
+maximum_images_per_call=3
+maximum_bytes_per_image=10485760
+image_association=md5 exact or same-conversation nearest time within 1 hour
+cloud_media_path_or_key_exposure=false
+
+PRODUCTION
+active_release=p9m1-20260831-1238-84d3722-61a2bf90
+rollback_release=p8v1-20260831-1219-ad77988-5d3a918c
+last_physical_positive_release=p8r1-20260831-0916-fca4b1a-b19a035e
+release_archive_sha256=bc6dad8386c7cd5fed254d401179cb7c3fa6a836368df3758f8e4eff65246945
+image_id=sha256:3798ff46c78464543d937ceef517ae98125aaa843e71feaf198ee5babba1cd04
+pre_activation_database_sha256=b88e316a848e724355779cf62fbdc603de74abb857118cfa45768fafb8678b66
+api_health=healthy
+caddy_health=healthy
+database_integrity=ok
+cloud_state=ready
+home_node_state=online
+accepted_capability_count=5
+wechat_original_images_accepted=true
+cloud_log_error_markers=0
+secret_in_cloud_log=false
+
+PRODUCTION NEGATIVE TESTS
+conversation_page_unknown_contact_failed_safely=true
+voice_unknown_contact_failed_safely=true
+image_unknown_contact_failed_safely=true
+synthetic_conversations_deleted=true
+
+PENDING
+explicit_authorization_to_push_local_commits_to_origin_master
+Codemagic iOS build and artifact audit
+physical iPhone contact/group page, voice transcript, and original-image display acceptance

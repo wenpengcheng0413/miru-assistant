@@ -26,8 +26,13 @@ while ($true) {
         continue
     }
     try {
-        & $python -m miru_node --config $ConfigPath
-        $code = $LASTEXITCODE
+        Push-Location $server
+        try {
+            & $python -m miru_node --config $ConfigPath
+            $code = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
         Add-Content -LiteralPath $guardianLog -Value "$(Get-Date -Format o) node_exit=$code" -Encoding UTF8
     } catch {
         Add-Content -LiteralPath $guardianLog -Value "$(Get-Date -Format o) launch_failed" -Encoding UTF8

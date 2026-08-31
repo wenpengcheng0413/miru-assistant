@@ -67,6 +67,7 @@ async def node_socket(websocket: WebSocket) -> None:
         protocol_version=PROTOCOL_VERSION,
         capabilities=capabilities,
     )
+    await services.node_rpc.attach(connection_id, websocket.send_json)
     accepted = list(registry.snapshot().capabilities)
     await websocket.send_json({
         "type": "node.welcome",
@@ -90,20 +91,31 @@ async def node_socket(websocket: WebSocket) -> None:
             except json.JSONDecodeError:
                 await websocket.close(code=4400, reason="invalid node frame")
                 break
-            if message.get("type") != "node.heartbeat":
-                await websocket.close(code=4400, reason="unsupported phase6 frame")
+            message_type = message.get("type")
+            if message_type == "node.heartbeat":
+                if message.get("node_id") != cfg.node_id or not registry.heartbeat(connection_id):
+                    await websocket.close(code=4409, reason="node connection replaced")
+                    break
+                await websocket.send_json({
+                    "type": "node.heartbeat_ack",
+                    "protocol_version": PROTOCOL_VERSION,
+                    "received_at": datetime.now(timezone.utc).isoformat(),
+                })
+            elif message_type == "job.result":
+                if message.get("protocol_version") != PROTOCOL_VERSION:
+                    await websocket.close(code=4400, reason="invalid job result")
+                    break
+                services.node_rpc.accept_result(connection_id, message)
+                registry.heartbeat(connection_id)
+            elif message_type == "job.cancel_ack":
+                registry.heartbeat(connection_id)
+            else:
+                await websocket.close(code=4400, reason="unsupported node frame")
                 break
-            if message.get("node_id") != cfg.node_id or not registry.heartbeat(connection_id):
-                await websocket.close(code=4409, reason="node connection replaced")
-                break
-            await websocket.send_json({
-                "type": "node.heartbeat_ack",
-                "protocol_version": PROTOCOL_VERSION,
-                "received_at": datetime.now(timezone.utc).isoformat(),
-            })
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
     finally:
         if connection_id is not None:
+            await services.node_rpc.detach(connection_id)
             registry.disconnect(connection_id)
         logger.info("Home Node disconnected")

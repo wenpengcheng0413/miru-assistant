@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from typing import Any
 
 from ..core.events import tool_end as tool_end_event
@@ -26,6 +27,7 @@ class ToolRegistry:
         self._all: dict[str, type[Tool]] = {t.name: t for t in (tools or [])}
         self._enabled: set[str] = set(enabled) if enabled is not None else set(self._all)
         self.profile = profile
+        self._home_node = None
         # 白名单里提到但不存在的名字 → 告警
         for name in self._enabled - set(self._all):
             logger.warning("tools.enabled 里没有实现 %s，已忽略", name)
@@ -34,14 +36,19 @@ class ToolRegistry:
     def enabled_names(self) -> list[str]:
         names = sorted(n for n in self._enabled if n in self._all)
         if self.profile == "cloud":
-            # A directly constructed registry may still contain a future
-            # node-home class.  Do not expose it to the cloud LLM schema until
-            # the Home Node/RPC phase implements its transport.
-            names = [
-                n for n in names
-                if self._all[n].metadata().get("execution_location") != "node-home"
-            ]
+            snapshot = self._home_node.snapshot() if self._home_node is not None else None
+            names = [n for n in names if (
+                self._all[n].metadata().get("execution_location") != "node-home"
+                or (
+                    snapshot is not None
+                    and snapshot.state == "online"
+                    and n in snapshot.capabilities
+                )
+            )]
         return names
+
+    def bind_home_node(self, home_node: Any) -> None:
+        self._home_node = home_node
 
     def get(self, name: str) -> type[Tool] | None:
         if name in self._enabled:
@@ -71,6 +78,7 @@ class ToolRegistry:
             self.profile == "cloud"
             and metadata is not None
             and metadata.get("execution_location") == "node-home"
+            and self._home_node is None
         ):
             return ToolResult.failure(
                 "Home Node 未配置",
@@ -89,8 +97,9 @@ class ToolRegistry:
         await ctx.emit(tool_start_event(call_id, name, args))
         started = time.monotonic()
         try:
+            call_ctx = replace(ctx, rpc_job_id=call_id)
             result = await asyncio.wait_for(
-                tool_cls().run(ctx, **args), timeout=float(getattr(tool_cls, "timeout_s", DEFAULT_TOOL_TIMEOUT_S))
+                tool_cls().run(call_ctx, **args), timeout=float(getattr(tool_cls, "timeout_s", DEFAULT_TOOL_TIMEOUT_S))
             )
         except asyncio.TimeoutError:
             timeout_s = float(getattr(tool_cls, "timeout_s", DEFAULT_TOOL_TIMEOUT_S))
@@ -137,6 +146,7 @@ def build_registry(config: Any) -> ToolRegistry:
         MemorySetTool,
     )
     from .builtin.system import GetCurrentTimeTool
+    from .builtin.home_node import HomeNodePingTool
     enabled = list(config.tools.enabled)
     tools: list[type[Tool]] = [
         GetCurrentTimeTool,
@@ -147,6 +157,7 @@ def build_registry(config: Any) -> ToolRegistry:
         MemorySearchTool,
         ApiCostReportTool,
         ApiBudgetSetTool,
+        HomeNodePingTool,
     ]
     profile = getattr(config, "profile", "development")
     if profile != "cloud":

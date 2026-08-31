@@ -13,6 +13,7 @@ from .cost.tracker import CostTracker
 from .db.database import init_db
 from .memory.store import MemoryStore
 from .node_registry import HomeNodeRegistry
+from .node_rpc import HomeNodeRpc
 from .persona.builder import PersonaManager
 from .stt.base import NoneSTT, STTEngine, STTUnavailable, create_stt
 from .tools.registry import ToolRegistry, build_registry
@@ -53,6 +54,7 @@ class Services:
     tts_provider: TTSProvider | None
     tts_fallback: TTSProvider | None
     home_node: HomeNodeRegistry
+    node_rpc: HomeNodeRpc
 
 
 def create_services(config: AppConfig) -> Services:
@@ -92,11 +94,14 @@ def create_services(config: AppConfig) -> Services:
                 type(exc).__name__,
             )
 
+    home_node = HomeNodeRegistry(config.home_node)
+    tools = build_registry(config)
+    tools.bind_home_node(home_node)
     return Services(
         config=config,
         db=db,
         llm=LLMClient(config.llm),
-        tools=build_registry(config),
+        tools=tools,
         persona=PersonaManager(config.resolve(config.persona.dir)),
         memory=MemoryStore(db),
         cost=CostTracker(db, pricing),
@@ -104,5 +109,6 @@ def create_services(config: AppConfig) -> Services:
         stt=stt,
         tts_provider=tts_provider,
         tts_fallback=tts_fallback,
-        home_node=HomeNodeRegistry(config.home_node),
+        home_node=home_node,
+        node_rpc=HomeNodeRpc(home_node),
     )

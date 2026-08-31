@@ -21,7 +21,8 @@ cloud_url: $CloudUrl
 node_id: node-home
 token_path: "$($tokenPath.Replace('\', '\\'))"
 journal_path: "$($journalPath.Replace('\', '\\'))"
-capabilities: []
+capabilities:
+  - home_node_ping
 connect_timeout_s: 12
 max_backoff_s: 60
 "@

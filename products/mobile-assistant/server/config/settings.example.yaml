@@ -111,7 +111,8 @@ home_node:
   enabled: false
   node_id: node-home
   token: "${MIRU_HOME_NODE_TOKEN}"  # 与 App Token 独立；Windows 使用 DPAPI 保存
-  allowed_capabilities: []           # Phase 7 起逐项启用
+  allowed_capabilities:              # 固定白名单；禁止任意命令能力
+    - home_node_ping
   heartbeat_interval_s: 20
   stale_after_s: 30
   offline_after_s: 60

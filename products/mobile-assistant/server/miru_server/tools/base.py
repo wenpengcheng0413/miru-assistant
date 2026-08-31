@@ -13,6 +13,7 @@ class ToolContext:
     conversation_id: str
     turn_id: str = ""
     process_seq: int = 0
+    rpc_job_id: str = ""
     emit: Callable[[dict], Awaitable[None]] = field(default=lambda _: _noop({}))
 
 

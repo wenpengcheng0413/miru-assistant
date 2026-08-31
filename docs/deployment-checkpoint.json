@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-31T08:14:00+08:00",
+  "updated_at": "2026-08-31T08:58:55+08:00",
   "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
   "git": {
     "branch": "master",
@@ -8,13 +8,14 @@
     "phase5_implementation_commit": "a6a4545f62393e397e2dd8d519c201e72cd64615",
     "phase6_implementation_commit": "2afc75aa7ec643a0b0a1831a796ed41b4ad63e76",
     "phase6_task_runner_fix_commit": "421b9600c4aa87d4ea573742c1c37f9f4849d1d5",
-    "push_state": "phase6_commits_local; origin master push awaiting explicit authorization",
+    "phase7_implementation_commit": "fe30d3c869409c761f69e2c842acc26ff751e380",
+    "push_state": "phase6_and_phase7_commits_local; origin master push awaiting explicit authorization",
     "dirty_worktree_preserved": true
   },
   "production": {
     "state": "healthy",
-    "active_release": "p6-20260831-0745-2afc75a-03ae6b12",
-    "rollback_release": "p5-20260830-1747-194b844-2a26ad6c",
+    "active_release": "p7-20260831-0849-fe30d3c-f539332e",
+    "rollback_release": "p6-20260831-0745-2afc75a-03ae6b12",
     "access": "tailscale-private-https-wss",
     "funnel": "off",
     "public_business_ports": "none"
@@ -70,7 +71,24 @@
       ],
       "pending_gates": []
     },
-    "7": "pending",
+    "7": {
+      "state": "in_progress",
+      "completed_gates": [
+        "bounded Cloud-to-Home-Node RPC manager",
+        "fixed read-only home_node_ping tool with dynamic online schema",
+        "timeout cancellation and late-result discard",
+        "bounded Windows result Journal and duplicate replay",
+        "unsupported capability rejection and no arbitrary command execution",
+        "server regression: 105 passed, 1 sandbox-only DPAPI skip",
+        "production release activation with database backup and rollback",
+        "real Tailnet LLM-to-node RPC success",
+        "real RPC recovery after Cloud API restart",
+        "real RPC recovery after Windows Home Node restart"
+      ],
+      "pending_gates": [
+        "physical iPhone home_node_ping acceptance"
+      ]
+    },
     "8": "pending",
     "9": "pending",
     "10": "pending"
@@ -87,8 +105,8 @@
     "artifact_version": "0.3.0+3",
     "artifact_sha256": "8805CCBEE0FDDDC52B35F1DE4556926EA5B4A36A8FF8E5EEC230105CB72893F0"
   },
-  "human_gate": null,
-  "next_action": "implement and test Phase 7 home_node_ping RPC with timeout, cancellation, deduplication, late-result handling, reconnect, and API-restart recovery",
+  "human_gate": "On the physical iPhone, ask Miru to call home_node_ping and confirm that the Home Node is online and responding.",
+  "next_action": "complete the physical iPhone Phase 7 home_node_ping acceptance, then begin the Phase 8 privacy-scoped WeChat read-only adapter",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,
@@ -119,5 +137,14 @@
       "cloud_speech_to_text": "Phase 9"
     }
   },
-  "evidence_root": "docs/evidence/phase6/p6-20260831-0745-2afc75a-03ae6b12"
+  "phase7": {
+    "release_archive_sha256": "05e97fa5f81ce85f071a9ce5be844368530df8ddee9cca6f5efa89c4b58240c2",
+    "image_id": "sha256:e518974de753e9eb95799b09ca336486b11641a9a9f8eea463a61f56ab41a26b",
+    "pre_activation_database_sha256": "cdfe7146e6dabaf1d8d8d3c32f12378d261beb46516d7d2650960004a985f83c",
+    "home_node_state": "online",
+    "accepted_capabilities": ["home_node_ping"],
+    "automated_verification": "passed",
+    "physical_app_acceptance": "pending"
+  },
+  "evidence_root": "docs/evidence/phase7/p7-20260831-0849-fe30d3c-f539332e"
 }

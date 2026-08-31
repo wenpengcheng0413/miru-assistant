@@ -1,0 +1,48 @@
+Miru Phase 7 home_node_ping RPC verification
+Recorded: 2026-08-31 08:58 CST
+
+SOURCE AND TESTS
+implementation_commit=fe30d3c869409c761f69e2c842acc26ff751e380
+phase7_targeted=6 passed
+server_regression=105 passed, 1 skipped
+dpapi_skip_reason=sandbox profile only; real Windows DPAPI test previously passed
+powershell_parser_errors=0
+compileall=passed
+
+PRODUCTION RELEASE
+active_release=p7-20260831-0849-fe30d3c-f539332e
+rollback_release=p6-20260831-0745-2afc75a-03ae6b12
+release_archive_sha256=05e97fa5f81ce85f071a9ce5be844368530df8ddee9cca6f5efa89c4b58240c2
+image_id=sha256:e518974de753e9eb95799b09ca336486b11641a9a9f8eea463a61f56ab41a26b
+pre_activation_database_sha256=cdfe7146e6dabaf1d8d8d3c32f12378d261beb46516d7d2650960004a985f83c
+api_health=healthy
+caddy_health=healthy
+database_integrity=ok
+startup_secret_leak=false
+
+RPC BOUNDARY
+capability=home_node_ping
+execution=outbound Home Node WSS only
+arbitrary_command_execution=false
+node_inflight_limit=2
+request_argument_limit=8192 characters
+result_frame_limit=32768 bytes
+journal_limit=100 results
+timeout_cancel=passed
+late_result_discard=passed
+disconnect_failure=passed
+duplicate_result_replay=passed
+unsupported_tool_rejection=passed
+
+REAL PRODUCTION TESTS
+initial_status=Cloud ready / Home Node online / home_node_ping accepted
+initial_llm_tool_invocation=passed
+initial_real_node_rpc=passed
+synthetic_conversation_cleanup=passed
+cloud_api_restart_reconnect=passed
+post_cloud_restart_real_rpc=passed
+windows_node_restart_reconnect=passed
+post_node_restart_real_rpc=passed
+
+PENDING HUMAN ACCEPTANCE
+physical_iPhone_home_node_ping=not_yet_confirmed

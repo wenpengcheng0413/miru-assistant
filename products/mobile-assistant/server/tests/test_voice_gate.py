@@ -20,6 +20,7 @@ class _FakeWS:
 
 class _FakeSTT:
     name = "fake"
+    supports_partial = True
 
     def __init__(self):
         self.calls = 0
@@ -105,3 +106,10 @@ async def test_hold_merges_segments_into_one_turn():
     await voice.on_audio_end(["attachment-1"])
     assert len(finals) == 1                      # 松手合并成一轮
     assert finals[0] == ("测试 测试", ["attachment-1"])
+
+
+async def test_non_streaming_cloud_stt_does_not_start_repeated_partial_calls():
+    stt, voice = _make_session()
+    stt.supports_partial = False
+    await voice._start_partial_loop()
+    assert voice._partial_task is None

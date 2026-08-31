@@ -80,6 +80,7 @@ def build_safe_status(services) -> dict:
     cloud_tools = services.tools.enabled_names
     voice_available = services.tts_provider is not None
     voice_reason = "" if voice_available else "provider_not_configured"
+    stt_available = services.stt.name != "none"
     node = services.home_node.snapshot()
     node_online = node.state == "online"
     node_capabilities = set(node.capabilities)
@@ -108,7 +109,14 @@ def build_safe_status(services) -> dict:
             "cost": "available",
             "cloud_tool": "available" if cloud_tools else "unavailable",
             "attachments_metadata": "available",
-            "stt": "available" if services.stt.name != "none" else "unavailable",
+            "stt": {
+                "available": stt_available,
+                "location": "cloud" if cfg.is_cloud else "server",
+                "provider": services.stt.name if stt_available else "",
+                "reason": "" if stt_available else (
+                    "disabled" if cfg.stt.engine == "none" else "provider_not_configured"
+                ),
+            },
             "tts": "available" if voice_available else "unavailable",
             "voice_reason": voice_reason,
             "wechat": "available" if wechat_available else "unavailable",

@@ -20,7 +20,16 @@ llm:
   max_tool_rounds: 6
 
 stt:
-  engine: none
+  engine: qwen
+  language: auto
+  qwen:
+    # The legacy shared endpoint remains supported; a workspace-specific
+    # Beijing endpoint can replace this value later without a code change.
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key: "${MIRU_STT_API_KEY}"
+    model: qwen3-asr-flash
+    timeout_s: 30
+    enable_itn: true
 
 tts:
   provider: none

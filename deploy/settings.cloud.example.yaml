@@ -24,6 +24,14 @@ llm:
 
 stt:
   engine: none
+  # engine: qwen
+  # language: auto
+  # qwen:
+  #   base_url: "${MIRU_STT_BASE_URL}"
+  #   api_key: "${MIRU_STT_API_KEY}"
+  #   model: qwen3-asr-flash
+  #   timeout_s: 30
+  #   enable_itn: true
 
 tts:
   provider: none

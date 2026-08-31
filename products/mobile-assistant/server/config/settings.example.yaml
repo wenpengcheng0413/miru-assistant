@@ -24,7 +24,7 @@ llm:
   max_tool_rounds: 6      # 单轮对话工具循环上限（防死循环烧钱）
 
 stt:
-  engine: sensevoice      # sensevoice | whisper | none（none=纯文本模式）
+  engine: sensevoice      # sensevoice | whisper | qwen | none（none=纯文本模式）
   model_dir: ./data/models/sensevoice
   language: auto          # auto/zh/yue/en（SenseVoice 单模型支持中粤英混合）
   num_threads: 4
@@ -39,6 +39,12 @@ stt:
   whisper:                # 兜底引擎（本机已有 faster-whisper 模型）
     model: small
     model_dir: ./data/models
+  qwen:                   # Cloud 外部 STT；音频仅在本轮内存中转为 WAV，不落盘
+    base_url: "${MIRU_STT_BASE_URL}"
+    api_key: "${MIRU_STT_API_KEY}"
+    model: qwen3-asr-flash
+    timeout_s: 30
+    enable_itn: true
 
 tts:
   provider: minimax       # minimax | edge | none

@@ -22,6 +22,8 @@ class LazySTT:
     """包装真实 STT 引擎：延迟创建 + 闲置卸载。对外只暴露 transcribe/maybe_unload。"""
 
     name = "lazy"
+    supports_partial = True
+    is_local = True
 
     def __init__(
         self,

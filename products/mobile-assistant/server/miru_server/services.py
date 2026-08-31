@@ -37,6 +37,8 @@ def _stt_config_ok(cfg: STTConfig) -> bool:
             return importlib.util.find_spec("faster_whisper") is not None
         except Exception:
             return False
+    if cfg.engine == "qwen":
+        return bool(cfg.qwen.api_key and cfg.qwen.base_url and cfg.qwen.model)
     return True
 
 
@@ -70,13 +72,21 @@ def create_services(config: AppConfig) -> Services:
             "STT 依赖/模型缺失（engine=%s），进入文本模式", config.stt.engine
         )
         stt = NoneSTT()
-    else:
+    elif config.stt.engine in {"sensevoice", "whisper"}:
         from .stt.lazy import LazySTT
 
         stt = LazySTT(
             factory=lambda: create_stt(config.stt),
             idle_unload_seconds=config.stt.idle_unload_seconds,
         )
+    else:
+        # Cloud providers are lightweight clients and do not own a local model,
+        # so they can be constructed eagerly without affecting the 2 GB budget.
+        try:
+            stt = create_stt(config.stt)
+        except STTUnavailable:
+            logger.warning("STT Provider 配置无效，进入文本模式")
+            stt = NoneSTT()
 
     tts_provider, tts_fallback = None, None
     # MiniMax is an optional voice capability. A cloud process with no

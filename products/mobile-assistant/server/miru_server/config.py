@@ -56,8 +56,18 @@ class VADConfig(BaseModel):
     max_utterance_ms: int = 15000
 
 
+class QwenSTTConfig(BaseModel):
+    """Alibaba Model Studio Qwen ASR over its OpenAI-compatible API."""
+
+    base_url: str = ""
+    api_key: str = ""
+    model: str = "qwen3-asr-flash"
+    timeout_s: float = 30.0
+    enable_itn: bool = True
+
+
 class STTConfig(BaseModel):
-    engine: str = "sensevoice"          # sensevoice | whisper | none
+    engine: str = "sensevoice"          # sensevoice | whisper | qwen | none
     model_dir: str = "./data/models/sensevoice"
     language: str = "auto"
     num_threads: int = 4
@@ -67,6 +77,7 @@ class STTConfig(BaseModel):
     vad: VADConfig = Field(default_factory=VADConfig)
     whisper_model: str = "small"
     whisper_model_dir: str = "./data/models"
+    qwen: QwenSTTConfig = Field(default_factory=QwenSTTConfig)
 
 
 class MiniMaxConfig(BaseModel):
@@ -192,8 +203,7 @@ class AppConfig(BaseModel):
         self.profile = profile
         if profile == "cloud":
             # Cloud must not probe LAN/Bonjour, import WeChat, or load a local
-            # SenseVoice/Whisper model. Voice is reported unavailable until a
-            # later external-provider phase supplies it explicitly.
+            # SenseVoice/Whisper model. External providers remain allowed.
             self.server.advertise_lan = False
             # Fail closed if an old local config carried the development
             # wildcard; browser origins must be explicitly enumerated later.
@@ -202,7 +212,8 @@ class AppConfig(BaseModel):
                 for origin in self.server.cors_origins
                 if origin.strip() and origin.strip() != "*"
             ]
-            self.stt.engine = "none"
+            if self.stt.engine in {"sensevoice", "whisper"}:
+                self.stt.engine = "none"
             # Cloud never imports the local WeChat implementation. Only when
             # Home Node is explicitly enabled may the fixed Phase 8 proxy stay
             # configured; its schema remains hidden until the node is online.

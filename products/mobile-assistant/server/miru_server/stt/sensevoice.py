@@ -27,6 +27,8 @@ except ImportError:
 
 class SenseVoiceSTT:
     name = "sensevoice"
+    supports_partial = True
+    is_local = True
 
     def __init__(self, cfg: STTConfig):
         if not SHERPA_AVAILABLE:

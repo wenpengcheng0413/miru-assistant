@@ -24,6 +24,8 @@ except ImportError:
 
 class WhisperSTT:
     name = "whisper"
+    supports_partial = True
+    is_local = True
 
     def __init__(self, cfg: STTConfig):
         if not WHISPER_AVAILABLE:

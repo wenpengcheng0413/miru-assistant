@@ -399,7 +399,7 @@ class AgentPipeline:
                     self.services.cost.record_llm,
                     ctx.conversation_id, model_name, usage,
                 )
-            if ctx.mode == "voice":
+            if ctx.mode == "voice" and getattr(self.services.stt, "is_local", True):
                 await asyncio.to_thread(
                     self.services.cost.record_local, "stt", self.services.stt.name, ctx.conversation_id
                 )

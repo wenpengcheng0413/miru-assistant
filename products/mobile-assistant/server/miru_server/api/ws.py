@@ -149,6 +149,8 @@ class VoiceSession:
             await _safe_send(self.ws, events.stt_partial(" ".join(self._segments)))
 
     async def _start_partial_loop(self) -> None:
+        if not getattr(self.stt, "supports_partial", True):
+            return
         interval = max(self.cfg.stt.partial_interval_ms, 300) / 1000
         if self._partial_task:
             self._partial_task.cancel()

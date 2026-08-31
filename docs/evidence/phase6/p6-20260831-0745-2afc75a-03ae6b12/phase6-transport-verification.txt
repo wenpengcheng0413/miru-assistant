@@ -1,0 +1,55 @@
+Miru Phase 6 Home Node transport verification
+Recorded: 2026-08-31 08:07 CST
+
+SOURCE
+implementation_commit=2afc75a
+task_runner_fix_commit=421b960
+server_regression=99 passed, 1 skipped
+phase6_targeted=7 passed, 1 skipped
+dpapi_real_profile_test=passed
+powershell_parser_errors=0
+
+PRODUCTION RELEASE
+active_release=p6-20260831-0745-2afc75a-03ae6b12
+rollback_release=p5-20260830-1747-194b844-2a26ad6c
+release_archive_sha256=c4030ca178e2f9ed0240b0c428b833bb9f642c38e9b5c03bbd8e48b80c251dc6
+image_id=sha256:55e67b1bad07fd0d9302a9a49d37682e31cdad1998a2724715ac39a75fe3de80
+pre_activation_database_sha256=2388f7cfd627b0740f373adb4ee6e667eb4b196bd33e503f6be8d0b3c8cc4484
+api_container=running/healthy
+caddy_container=running/healthy
+cloud_state=ready
+
+WINDOWS HOME NODE
+node_id=node-home
+transport=outbound-only WSS over Tailscale private HTTPS
+node_token=separate from App Token; DPAPI CurrentUser encrypted at rest
+token_plaintext_in_config=false
+scheduled_task=Miru Home Node
+scheduled_task_trigger=current-user AtLogOn
+scheduled_task_state=Running
+capabilities=[]
+
+IDENTITY REJECTIONS
+wrong_token_close_code=4401
+unknown_node_id_close_code=4403
+unsupported_protocol_close_code=4400
+
+LIVENESS AND RECOVERY
+initial_state=online
+task_stop_transition=stale/node_reconnecting
+offline_threshold_transition=offline/heartbeat_timeout
+cloud_during_node_outage=ready
+task_restart_result=online
+cloud_container_restart_result=online
+tailscale_service_restart_result=online
+automatic_reconnect=true
+
+SECURITY BOUNDARY
+funnel=off
+public_business_ports=none
+windows_inbound_listener=none
+node_token_logged=false
+app_token_and_node_token_separate=true
+
+PENDING HUMAN ACCEPTANCE
+physical_iPhone_status_transition=not_yet_confirmed

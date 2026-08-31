@@ -1,18 +1,20 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-31T07:28:53+08:00",
+  "updated_at": "2026-08-31T08:07:13+08:00",
   "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
   "git": {
     "branch": "master",
     "head_before_phase5_commit": "194b8442608b3cc516d0a3ddf8118a0695cc0f44",
     "phase5_implementation_commit": "a6a4545f62393e397e2dd8d519c201e72cd64615",
-    "push_state": "pushed_to_origin_master",
+    "phase6_implementation_commit": "2afc75aa7ec643a0b0a1831a796ed41b4ad63e76",
+    "phase6_task_runner_fix_commit": "421b9600c4aa87d4ea573742c1c37f9f4849d1d5",
+    "push_state": "phase6_commits_local; origin master push awaiting explicit authorization",
     "dirty_worktree_preserved": true
   },
   "production": {
     "state": "healthy",
-    "active_release": "p5-20260830-1747-194b844-2a26ad6c",
-    "rollback_release": "p4-20260829-1430-194b844-b9be8488",
+    "active_release": "p6-20260831-0745-2afc75a-03ae6b12",
+    "rollback_release": "p5-20260830-1747-194b844-2a26ad6c",
     "access": "tailscale-private-https-wss",
     "funnel": "off",
     "public_business_ports": "none"
@@ -49,13 +51,20 @@
     },
     "6": {
       "state": "in_progress",
-      "completed_gates": [],
+      "completed_gates": [
+        "Cloud node WebSocket identity and bounded capability registry",
+        "Windows outbound-only Home Node client with DPAPI token storage",
+        "separate App Token and Node Token",
+        "20-second heartbeat with 30-second stale and 60-second offline transitions",
+        "wrong token, unknown node_id, and unsupported protocol rejection",
+        "Windows current-user AtLogOn automatic startup task",
+        "node stop and restart recovery with Cloud remaining ready",
+        "controlled Miru Cloud container restart and automatic node reconnect",
+        "controlled Tailscale service restart and automatic node reconnect",
+        "server regression: 99 passed, 1 sandbox-only DPAPI skip; real DPAPI test passed",
+        "production release activation, health, database backup, and rollback verification"
+      ],
       "pending_gates": [
-        "Cloud node WebSocket identity and capability registry",
-        "Windows outbound-only Home Node client with secure token storage",
-        "heartbeat, stale/offline transition, reconnect, and Cloud restart recovery",
-        "wrong token and unknown node_id rejection",
-        "Windows automatic startup",
         "physical app status transition acceptance"
       ]
     },
@@ -76,8 +85,8 @@
     "artifact_version": "0.3.0+3",
     "artifact_sha256": "8805CCBEE0FDDDC52B35F1DE4556926EA5B4A36A8FF8E5EEC230105CB72893F0"
   },
-  "human_gate": null,
-  "next_action": "implement and test the Phase 6 Home Node identity, outbound WebSocket, heartbeat, reconnect, state registry, and Windows autostart boundary",
+  "human_gate": "Confirm the physical iPhone shows Cloud Online / Home Node Online, then Home Node Offline while the controlled node pause leaves Cloud chat usable, and Online again after restart.",
+  "next_action": "complete the physical iPhone Phase 6 status-transition acceptance, then mark Phase 6 passed and begin Phase 7 home_node_ping RPC",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,
@@ -94,5 +103,14 @@
     "temporary_packages_removed": true,
     "automated_verification": "passed"
   },
-  "evidence_root": "docs/evidence/phase5/p5-20260830-1747-194b844-2a26ad6c"
+  "phase6": {
+    "release_archive_sha256": "c4030ca178e2f9ed0240b0c428b833bb9f642c38e9b5c03bbd8e48b80c251dc6",
+    "image_id": "sha256:55e67b1bad07fd0d9302a9a49d37682e31cdad1998a2724715ac39a75fe3de80",
+    "pre_activation_database_sha256": "2388f7cfd627b0740f373adb4ee6e667eb4b196bd33e503f6be8d0b3c8cc4484",
+    "home_node_state": "online",
+    "scheduled_task": "running",
+    "automated_verification": "passed",
+    "physical_app_acceptance": "pending"
+  },
+  "evidence_root": "docs/evidence/phase6/p6-20260831-0745-2afc75a-03ae6b12"
 }

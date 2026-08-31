@@ -1,0 +1,10 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+COPY --chown=miru:miru server/miru_server/config.py /app/miru_server/config.py
+COPY --chown=miru:miru server/miru_server/main.py /app/miru_server/main.py
+COPY --chown=miru:miru server/miru_server/api/node_media.py /app/miru_server/api/node_media.py
+COPY --chown=miru:miru server/miru_server/core/events.py /app/miru_server/core/events.py
+COPY --chown=miru:miru server/miru_server/core/pipeline.py /app/miru_server/core/pipeline.py
+COPY --chown=miru:miru server/miru_server/tools/registry.py /app/miru_server/tools/registry.py
+COPY --chown=miru:miru server/miru_server/tools/builtin/wechat_node.py /app/miru_server/tools/builtin/wechat_node.py

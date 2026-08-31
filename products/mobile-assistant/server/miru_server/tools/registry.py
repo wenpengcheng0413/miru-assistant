@@ -160,7 +160,11 @@ def build_registry(config: Any) -> ToolRegistry:
         HomeNodePingTool,
     ]
     profile = getattr(config, "profile", "development")
-    if profile != "cloud":
+    if profile == "cloud":
+        from .builtin.wechat_node import WechatSearchMessagesNodeTool
+
+        tools.append(WechatSearchMessagesNodeTool)
+    else:
         from .builtin.wechat import (
             WechatChatStatsTool,
             WechatContactListTool,
@@ -197,6 +201,4 @@ def build_registry(config: Any) -> ToolRegistry:
             WechatGroupListTool,
             WechatGroupDigestTool,
         ])
-    else:
-        enabled = [name for name in enabled if not name.startswith("wechat_")]
     return ToolRegistry(tools=tools, enabled=enabled, profile=profile)

@@ -122,19 +122,40 @@ class HomeNodeClient:
     async def _run_job(self, request: dict) -> dict:
         tool = request.get("tool")
         args = request.get("args")
-        if tool != "home_node_ping" or tool not in self.config.capabilities:
+        if tool not in self.config.capabilities:
             return self._failure("node_capability_unavailable", "节点能力未启用", False)
-        if args != {}:
-            return self._failure("invalid_tool_arguments", "home_node_ping 不接受参数", False)
-        return {
-            "ok": True,
-            "data": {
-                "node_id": self.config.node_id,
-                "protocol_version": PROTOCOL_VERSION,
-                "state": "ok",
-                "node_time": datetime.now(timezone.utc).isoformat(),
-            },
-        }
+        if tool == "home_node_ping":
+            if args != {}:
+                return self._failure("invalid_tool_arguments", "home_node_ping 不接受参数", False)
+            return {
+                "ok": True,
+                "data": {
+                    "node_id": self.config.node_id,
+                    "protocol_version": PROTOCOL_VERSION,
+                    "state": "ok",
+                    "node_time": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+        if tool == "wechat_search_messages":
+            if not isinstance(args, dict):
+                return self._failure("invalid_tool_arguments", "微信搜索参数无效", False)
+            from .wechat_adapter import WeChatAdapterError, WeChatNodeAdapter
+
+            adapter = WeChatNodeAdapter(
+                self.config.wechat_data_root,
+                max_days=self.config.wechat_max_days,
+                max_results=self.config.wechat_max_results,
+            )
+            try:
+                data = await asyncio.to_thread(adapter.search_messages, **args)
+            except WeChatAdapterError as exc:
+                return self._failure(exc.error_code, exc.message, exc.retryable)
+            except (TypeError, ValueError):
+                return self._failure("invalid_tool_arguments", "微信搜索参数无效", False)
+            except Exception:
+                return self._failure("wechat_search_failed", "微信消息搜索失败", False)
+            return {"ok": True, "data": data}
+        return self._failure("node_capability_unavailable", "节点能力未启用", False)
 
     async def _finish_job(self, websocket, jobs: dict, job_id: str, task: asyncio.Task) -> None:
         jobs.pop(job_id, None)

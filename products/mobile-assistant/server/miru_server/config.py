@@ -203,8 +203,13 @@ class AppConfig(BaseModel):
                 if origin.strip() and origin.strip() != "*"
             ]
             self.stt.engine = "none"
+            # Cloud never imports the local WeChat implementation. Only when
+            # Home Node is explicitly enabled may the fixed Phase 8 proxy stay
+            # configured; its schema remains hidden until the node is online.
+            remote_node_tools = {"wechat_search_messages"} if self.home_node.enabled else set()
             self.tools.enabled = [
-                name for name in self.tools.enabled if not name.startswith("wechat_")
+                name for name in self.tools.enabled
+                if not name.startswith("wechat_") or name in remote_node_tools
             ]
             if self.home_node.enabled and len(self.home_node.token) < 32:
                 raise ValueError(

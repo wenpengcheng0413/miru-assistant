@@ -1,12 +1,11 @@
 # Phase 6 — Home Node transport execution report
 
-Status: **AUTOMATED PASS — PHYSICAL APP GATE PENDING**
-Updated: 2026-08-31 08:07 CST
+Status: **PASS**
+Completed: 2026-08-31 08:14 CST
 
 The production Home Node identity, outbound transport, liveness state machine,
 secure Windows credential storage, login startup task, and recovery paths are
-implemented and live. The only remaining Phase 6 gate is a short visual status
-check in the physical iPhone app.
+implemented, live, and accepted on the physical iPhone.
 
 ## Completed
 
@@ -45,13 +44,22 @@ check in the physical iPhone app.
   Funnel off, no public business ports, no Windows inbound listener, and no
   new public exposure.
 
-## Mandatory gate remaining
+## Physical iPhone acceptance
 
-On the physical iPhone, confirm that the status shows Cloud Online and Home
-Node Online. Then, during one controlled node pause, confirm that Home Node
-changes to Offline while Cloud chat remains usable; after restart, confirm it
-returns to Online. The automated API-side version of this transition has
-already passed.
+- The user confirmed `Cloud Online · Home Node Online` on the physical iPhone.
+- During a controlled Windows-node pause, the user confirmed
+  `Cloud Online · Home Node Offline` and Cloud chat continued replying.
+- The Windows task was restarted and the production registry returned to
+  Home Node `online`.
+
+The user also recorded three expected downstream gaps. Real-time WeChat record
+queries are a Phase 8 deliverable after Phase 7 RPC. Cloud image/attachment
+analysis and speech-to-text are Phase 9 deliverables. They are not counted as
+Phase 6 failures and are now explicit later-phase acceptance items.
+
+## Mandatory gates remaining
+
+None. Phase 7 may proceed.
 
 ## Rollback
 

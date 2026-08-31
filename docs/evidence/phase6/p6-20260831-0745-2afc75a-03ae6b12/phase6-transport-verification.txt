@@ -51,5 +51,13 @@ windows_inbound_listener=none
 node_token_logged=false
 app_token_and_node_token_separate=true
 
-PENDING HUMAN ACCEPTANCE
-physical_iPhone_status_transition=not_yet_confirmed
+PHYSICAL IPHONE ACCEPTANCE
+online_display=Cloud Online / Home Node Online confirmed
+offline_display=Cloud Online / Home Node Offline confirmed
+cloud_chat_while_node_offline=passed
+node_restored_after_acceptance=online
+
+RECORDED DOWNSTREAM GAPS
+wechat_record_queries=Phase 8
+cloud_image_attachment_analysis=Phase 9
+cloud_speech_to_text=Phase 9

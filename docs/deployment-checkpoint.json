@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-31T08:07:13+08:00",
+  "updated_at": "2026-08-31T08:14:00+08:00",
   "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
   "git": {
     "branch": "master",
@@ -50,7 +50,8 @@
       "pending_gates": []
     },
     "6": {
-      "state": "in_progress",
+      "state": "passed",
+      "completed_at": "2026-08-31T08:14:00+08:00",
       "completed_gates": [
         "Cloud node WebSocket identity and bounded capability registry",
         "Windows outbound-only Home Node client with DPAPI token storage",
@@ -62,11 +63,12 @@
         "controlled Miru Cloud container restart and automatic node reconnect",
         "controlled Tailscale service restart and automatic node reconnect",
         "server regression: 99 passed, 1 sandbox-only DPAPI skip; real DPAPI test passed",
-        "production release activation, health, database backup, and rollback verification"
+        "production release activation, health, database backup, and rollback verification",
+        "physical iPhone Cloud Online / Home Node Online display",
+        "physical iPhone Cloud Online / Home Node Offline display with Cloud chat remaining usable",
+        "Home Node restored online after physical acceptance"
       ],
-      "pending_gates": [
-        "physical app status transition acceptance"
-      ]
+      "pending_gates": []
     },
     "7": "pending",
     "8": "pending",
@@ -85,8 +87,8 @@
     "artifact_version": "0.3.0+3",
     "artifact_sha256": "8805CCBEE0FDDDC52B35F1DE4556926EA5B4A36A8FF8E5EEC230105CB72893F0"
   },
-  "human_gate": "Confirm the physical iPhone shows Cloud Online / Home Node Online, then Home Node Offline while the controlled node pause leaves Cloud chat usable, and Online again after restart.",
-  "next_action": "complete the physical iPhone Phase 6 status-transition acceptance, then mark Phase 6 passed and begin Phase 7 home_node_ping RPC",
+  "human_gate": null,
+  "next_action": "implement and test Phase 7 home_node_ping RPC with timeout, cancellation, deduplication, late-result handling, reconnect, and API-restart recovery",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,
@@ -110,7 +112,12 @@
     "home_node_state": "online",
     "scheduled_task": "running",
     "automated_verification": "passed",
-    "physical_app_acceptance": "pending"
+    "physical_app_acceptance": "passed",
+    "downstream_user_report": {
+      "wechat_record_queries": "Phase 8",
+      "cloud_image_attachment_analysis": "Phase 9",
+      "cloud_speech_to_text": "Phase 9"
+    }
   },
   "evidence_root": "docs/evidence/phase6/p6-20260831-0745-2afc75a-03ae6b12"
 }

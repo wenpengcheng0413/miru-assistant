@@ -24,6 +24,16 @@ llm:
 
 stt:
   engine: none
+  # 推荐免费优先方案（启用前先在腾讯云控制台关闭后付费）：
+  # engine: tencent
+  # tencent:
+  #   endpoint: https://asr.tencentcloudapi.com
+  #   secret_id: "${MIRU_TENCENT_ASR_SECRET_ID}"
+  #   secret_key: "${MIRU_TENCENT_ASR_SECRET_KEY}"
+  #   engine_model: 16k_zh-PY
+  #   timeout_s: 30
+  #   billing_guard: "${MIRU_TENCENT_ASR_BILLING_GUARD}"
+  # 付费备用：
   # engine: qwen
   # language: auto
   # qwen:

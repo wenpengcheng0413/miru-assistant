@@ -80,7 +80,8 @@ class HomeNodeRpc:
             )
         if len(self._pending) >= self.max_inflight:
             raise NodeRpcError("node_busy", "Home Node 正在处理其他任务", True)
-        if not isinstance(args, dict) or len(json.dumps(args, ensure_ascii=False)) > 8_192:
+        max_args_chars = 2_600_000 if tool_name == "speech_to_text" else 8_192
+        if not isinstance(args, dict) or len(json.dumps(args, ensure_ascii=False)) > max_args_chars:
             raise NodeRpcError("invalid_tool_arguments", "节点工具参数超限", False)
         value = job_id if isinstance(job_id, str) and 1 <= len(job_id) <= 128 else str(uuid.uuid4())
         if value in self._pending:

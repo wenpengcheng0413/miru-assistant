@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import time
@@ -53,7 +54,7 @@ class VoiceSession:
     """
 
     def __init__(self, ctx: SessionContext, stt, websocket: WebSocket, cfg,
-                 recording_timeout: float = 65.0):
+                 recording_timeout: float = 65.0, node_rpc=None, home_node=None):
         # 服务端窗口 65s > 客户端 60s 上限：服务端绝不在用户松手前抢先关窗
         self.ctx = ctx
         self.stt = stt
@@ -67,6 +68,38 @@ class VoiceSession:
         self._recording_timeout = recording_timeout
         self._ignored_audio_bytes = 0
         self._segments: list[str] = []   # 本次按键已识别的片段（松手时合并成一轮）
+        self._node_rpc = node_rpc
+        self._home_node = home_node
+
+    async def _transcribe(self, pcm: bytes) -> str:
+        primary_error: STTUnavailable | None = None
+        if getattr(self.stt, "name", "none") != "none":
+            try:
+                return await asyncio.to_thread(self.stt.transcribe, pcm)
+            except STTUnavailable as exc:
+                primary_error = exc
+        if self._node_rpc is not None and self._home_node is not None:
+            snapshot = self._home_node.snapshot()
+            if snapshot.state == "online" and "speech_to_text" in snapshot.capabilities:
+                try:
+                    result = await self._node_rpc.execute(
+                        "speech_to_text",
+                        {
+                            "sample_rate": 16_000,
+                            "pcm16_base64": base64.b64encode(pcm).decode("ascii"),
+                        },
+                        timeout_s=45,
+                    )
+                    if result.get("ok") and isinstance(result.get("data"), dict):
+                        return str(result["data"].get("text") or "").strip()
+                except Exception as exc:  # node errors are normalized below
+                    logger.warning(
+                        "Home Node STT fallback failed: exception_type=%s",
+                        type(exc).__name__,
+                    )
+        if primary_error is not None:
+            raise STTUnavailable("语音识别暂时不可用；免费云服务与家庭节点均未成功。")
+        raise STTUnavailable("STT 未配置，且家庭节点语音识别当前不可用。")
 
     def start_recording(self) -> None:
         """客户端按下录音键：打开音频闸门 + 重置 VAD + 启动看门狗。"""
@@ -136,7 +169,7 @@ class VoiceSession:
             return
         started = time.monotonic()
         try:
-            text = await asyncio.to_thread(self.stt.transcribe, pcm)
+            text = await self._transcribe(pcm)
         except STTUnavailable as e:
             if not self._stt_error_sent:
                 self._stt_error_sent = True
@@ -222,7 +255,14 @@ async def ws_session(websocket: WebSocket) -> None:
     logger.info("会话建立: %s (mode=%s, persona=%s)", ctx.conversation_id, mode, persona_name)
 
     pipeline = AgentPipeline(services)
-    voice = VoiceSession(ctx, services.stt, websocket, cfg)
+    voice = VoiceSession(
+        ctx,
+        services.stt,
+        websocket,
+        cfg,
+        node_rpc=services.node_rpc,
+        home_node=services.home_node,
+    )
     run_task: asyncio.Task | None = active.task if active is not None and not active.task.done() else None
 
     if run_task is not None:

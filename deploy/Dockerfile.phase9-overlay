@@ -2,9 +2,16 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 COPY --chown=miru:miru server/miru_server/config.py /app/miru_server/config.py
+COPY --chown=miru:miru server/miru_server/services.py /app/miru_server/services.py
 COPY --chown=miru:miru server/miru_server/main.py /app/miru_server/main.py
 COPY --chown=miru:miru server/miru_server/api/node_media.py /app/miru_server/api/node_media.py
+COPY --chown=miru:miru server/miru_server/api/rest.py /app/miru_server/api/rest.py
+COPY --chown=miru:miru server/miru_server/api/ws.py /app/miru_server/api/ws.py
 COPY --chown=miru:miru server/miru_server/core/events.py /app/miru_server/core/events.py
 COPY --chown=miru:miru server/miru_server/core/pipeline.py /app/miru_server/core/pipeline.py
+COPY --chown=miru:miru server/miru_server/node_rpc.py /app/miru_server/node_rpc.py
+COPY --chown=miru:miru server/miru_server/stt/base.py /app/miru_server/stt/base.py
+COPY --chown=miru:miru server/miru_server/stt/qwen_stt.py /app/miru_server/stt/qwen_stt.py
+COPY --chown=miru:miru server/miru_server/stt/tencent_stt.py /app/miru_server/stt/tencent_stt.py
 COPY --chown=miru:miru server/miru_server/tools/registry.py /app/miru_server/tools/registry.py
 COPY --chown=miru:miru server/miru_server/tools/builtin/wechat_node.py /app/miru_server/tools/builtin/wechat_node.py

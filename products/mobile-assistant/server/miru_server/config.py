@@ -66,8 +66,21 @@ class QwenSTTConfig(BaseModel):
     enable_itn: bool = True
 
 
+class TencentSTTConfig(BaseModel):
+    """Tencent Cloud one-sentence ASR with an explicit no-postpay safety gate."""
+
+    endpoint: str = "https://asr.tencentcloudapi.com"
+    secret_id: str = ""
+    secret_key: str = ""
+    engine_model: str = "16k_zh-PY"
+    timeout_s: float = 30.0
+    # This marker is deliberately separate from the credentials. Operators set
+    # it only after confirming that ASR postpay is disabled in the console.
+    billing_guard: str = ""
+
+
 class STTConfig(BaseModel):
-    engine: str = "sensevoice"          # sensevoice | whisper | qwen | none
+    engine: str = "sensevoice"          # sensevoice | whisper | tencent | qwen | none
     model_dir: str = "./data/models/sensevoice"
     language: str = "auto"
     num_threads: int = 4
@@ -77,6 +90,7 @@ class STTConfig(BaseModel):
     vad: VADConfig = Field(default_factory=VADConfig)
     whisper_model: str = "small"
     whisper_model_dir: str = "./data/models"
+    tencent: TencentSTTConfig = Field(default_factory=TencentSTTConfig)
     qwen: QwenSTTConfig = Field(default_factory=QwenSTTConfig)
 
 

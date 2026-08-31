@@ -1,49 +1,59 @@
-# Phase 9 Cloud STT 实施记录
+# Phase 9 免费优先 STT 实施记录
 
 日期：2026-09-01
-状态：代码与生产清单已就绪；Provider 凭据、部署和真机验收待完成。
+状态：腾讯云与家庭节点代码、配置门和离线测试已就绪；云账号凭据、部署和真机验收待完成。
 
-## 结论
+## 当前结论
 
-App 显示 `STT 未启用` 不是微信语音消息转写故障。生产 Cloud profile 原先会把所有 STT 强制改成 `none`，且生产配置也明确使用 `engine: none`。因此 Home Node 已能转写微信 SILK 语音，并不代表手机麦克风的 Cloud STT 已启用。
+生产环境暂时保持 `stt.engine: none`，因此在没有完成腾讯云控制台安全设置前，不会发送音频、消耗额度或产生费用。此前准备的阿里云百炼 Qwen 适配仍保留为可选备用，但已移出生产默认值和启动必需密钥。
 
-本阶段新增阿里云百炼 Qwen ASR Cloud Provider：
+免费优先链路为：
 
-- Cloud profile 继续禁止加载 SenseVoice、Whisper 和本地模型，但允许显式的 `qwen` 外部 Provider。
-- Flutter 现有 PCM16 16kHz 协议不变；服务端只在内存中封装单声道 WAV，再以 Base64 Data URL 发给 Provider，不写临时音频文件。
-- `qwen3-asr-flash` 是整句 HTTP 识别。Provider 声明 `supports_partial = false`，服务端不会每 800ms 重复上传累积音频，避免重复计费。
-- Provider 异常只记录异常类型，不记录响应正文、密钥或音频；客户端收到稳定的 `STTUnavailable` 错误。
-- `/api/status` 的 `stt` 能力现在返回结构化 `available/location/provider/reason`，旧 App 仍兼容。
-- Qwen 调用不再误记为“本地 0 元 STT”；精确的外部 STT 费用入账留给 Cost Monitor 阶段。
+1. 腾讯云“一句话识别”作为 Cloud 主 Provider，可在电脑关闭时工作。
+2. 主 Provider 未配置、请求失败或免费额度耗尽时，同一次语音自动尝试在线的 Home Node SenseVoice。
+3. 两者均不可用时只返回稳定的 `STTUnavailable`；文字聊天、历史和记忆不受影响。
 
-## 生产启用门
+## 安全与费用控制
 
-生产清单已切换到 `stt.engine: qwen`，并从只读文件 `/opt/miru/secrets/stt_api_key` 注入 `MIRU_STT_API_KEY`。在该文件存在且非空之前，**不要激活新生产清单**，因为 Compose 会按 fail-closed 规则拒绝启动。
+- 腾讯 Provider 只有在 SecretId、SecretKey 和 `billing_guard: postpay-disabled` 三者齐全时才会实例化。
+- `billing_guard` 不是腾讯云计费开关，而是 Miru 的第二道操作门。必须先在腾讯云控制台确认关闭后付费，再设置该值。
+- 当前生产 Compose 不挂载任何 STT 密钥，也不要求 STT 密钥才能启动。
+- Provider 请求使用 TC3-HMAC-SHA256；日志只保留异常类型或腾讯错误码，不记录密钥、响应消息、音频或识别文本。
+- 手机 PCM16 音频只在内存中 Base64 编码。腾讯链路最大 60 秒；家庭节点回退也固定为 16kHz、60 秒和 1,920,000 原始字节。
+- Home Node 回退通过现有独立 Node Token 认证的 WSS 连接发送，不写临时音频文件，不开放任意命令执行。
 
-启用时需要：
+## 腾讯云接口选择
 
-1. 在阿里云百炼开通 Qwen ASR，并创建服务端 API Key。
-2. 优先把 `base_url` 换成当前业务空间的北京专属 `compatible-mode/v1` 地址；当前共享地址保留为兼容默认值。
-3. 将 Key 写入服务器 `/opt/miru/secrets/stt_api_key`，权限限制为部署用户可读。
-4. 构建并原子激活新镜像，先验证 `/healthz`、`/readyz` 和带鉴权 `/api/status`。
-5. 用短 WAV 调 `/api/debug/stt` 做 Provider 验证，再进行 iPhone 按住说话、松手终判、失败重试和 PC 关机测试。
+- 接口：`SentenceRecognition`
+- 域名：`https://asr.tencentcloudapi.com`
+- 模型：`16k_zh-PY`（中英粤）
+- 输入：16kHz、单声道、PCM16，Base64 放在 JSON 请求内
+- 签名：TC3-HMAC-SHA256
 
-## 验证结果
+官方限制和参数见[一句话识别 API](https://cloud.tencent.com/document/api/1093/35646)，免费额度与后付费开关见[语音识别计费说明](https://cloud.tencent.com/document/product/1093/35686)。
 
-- 新增 Cloud STT 测试：Provider 配置门、Cloud profile、内存 WAV、响应解析、错误脱敏、生产 secret 清单。
-- 服务端完整测试：`125 passed, 1 skipped`。跳过项为当前沙箱无法执行的真实 DPAPI 测试。
-- Flutter analyze：无问题。
-- Flutter test：`7 passed`。
-- 新增文件的 Ruff 检查：通过。仓库全量 Ruff 仍有既存告警，不属于本阶段回归。
+## 启用门
+
+后续需要用户授权的控制台步骤：
+
+1. 登录腾讯云并确认语音识别服务的后付费处于关闭状态。
+2. 使用 CAM 子用户或角色创建仅用于 ASR 的最小权限凭据，禁止使用主账号永久密钥。
+3. 将 SecretId、SecretKey 作为服务器只读 Secret 写入，不写入仓库、App 或日志。
+4. 只有完成第 1 步后，才设置 `MIRU_TENCENT_ASR_BILLING_GUARD=postpay-disabled`。
+5. 部署后先用短测试 WAV 验证，再进行 iPhone、Home Node 离线和额度/Provider 失败回退验收。
+
+## 已完成的离线验证范围
+
+- 腾讯配置门、Cloud profile、PCM 请求、TC3 Authorization 头和响应解析。
+- Provider 错误消息与密钥脱敏。
+- Qwen 不再是生产默认值，生产启动不再依赖百炼密钥。
+- Cloud Provider 不可用时自动回退 Home Node SenseVoice。
+- Home Node 能力白名单、音频尺寸边界和动态 `/api/status`。
 
 ## 后续顺序
 
-1. 完成 Qwen ASR 凭据与 Cloud STT 真机验收。
-2. 接通现有 MiniMax TTS Provider 的生产凭据，完成 PC 关机语音问答闭环。
-3. 关闭 Phase 8/9 尚未留证的物理验收项。
-4. 进入 Phase 10：备份恢复演练、附件增量备份、容量/磁盘/Swap/Node 告警和恢复 Runbook。
-
-## Provider 依据
-
-- [阿里云百炼：Qwen-ASR API 参考](https://help.aliyun.com/zh/model-studio/qwen-asr-api-reference)
-- [阿里云百炼：语音识别模型选型](https://help.aliyun.com/zh/model-studio/asr-model)
+1. 完成腾讯云控制台的零账单保护与最小权限凭据。
+2. 部署 Cloud 与 Home Node 更新，验证主链路和自动回退。
+3. 完成 iPhone 麦克风 STT 真机验收。
+4. 评估免费 TTS 路线，完成电脑关闭时的语音问答闭环。
+5. 关闭 Phase 8/9 其余物理验收项，再进入 Phase 10 备份恢复与监控。

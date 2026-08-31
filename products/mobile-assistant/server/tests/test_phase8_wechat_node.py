@@ -432,6 +432,42 @@ async def test_node_client_executes_only_allowlisted_wechat_search(tmp_path, mon
 
 
 @pytest.mark.asyncio
+async def test_node_client_executes_bounded_local_speech_to_text(tmp_path, monkeypatch):
+    import base64
+
+    from miru_node import speech
+
+    config = NodeClientConfig(
+        cloud_url="wss://example.test/ws/node",
+        token_path=str(tmp_path / "token"),
+        journal_path=str(tmp_path / "journal.json"),
+        capabilities=["speech_to_text"],
+    )
+    client = HomeNodeClient(config)
+    monkeypatch.setattr(
+        speech,
+        "transcribe_pcm",
+        lambda pcm16, *, sample_rate, model_dir: (
+            "本地识别成功" if pcm16 == b"\x01\x00" * 1600 and sample_rate == 16_000 else ""
+        ),
+    )
+    result = await client._run_job({
+        "tool": "speech_to_text",
+        "args": {
+            "sample_rate": 16_000,
+            "pcm16_base64": base64.b64encode(b"\x01\x00" * 1600).decode("ascii"),
+        },
+    })
+    assert result == {"ok": True, "data": {"text": "本地识别成功"}}
+
+    oversized = await client._run_job({
+        "tool": "speech_to_text",
+        "args": {"sample_rate": 16_000, "pcm16_base64": "A" * 2_560_001},
+    })
+    assert oversized["error_code"] == "invalid_tool_arguments"
+
+
+@pytest.mark.asyncio
 async def test_cloud_proxy_routes_bounded_wechat_job():
     registry = HomeNodeRegistry(HomeNodeConfig(
         enabled=True,
@@ -525,6 +561,8 @@ def test_phase8_production_allowlist_contains_only_read_capability():
     assert settings.count("- wechat_original_images") == 2
     assert "  - wechat_transcribe_voice" in installer
     assert "  - wechat_original_images" in installer
+    assert settings.count("- speech_to_text") == 1
+    assert "  - speech_to_text" in installer
     assert "wechat_stt_model_dir: \"./data/models/sensevoice\"" in installer
     for forbidden in ["wechat_recent_messages", "wechat_image_analysis"]:
         assert f"  - {forbidden}" not in installer
@@ -534,7 +572,7 @@ def test_phase8_production_allowlist_contains_only_read_capability():
     assert "miru_server/tools/builtin/wechat_node.py" in dockerfile
 
 
-def test_status_marks_underscore_wechat_capability_available(app_config):
+def test_status_marks_wechat_and_home_node_stt_capabilities_available(app_config):
     values = app_config.model_dump()
     values["profile"] = "cloud"
     values["server"]["token"] = "test-token"
@@ -545,7 +583,7 @@ def test_status_marks_underscore_wechat_capability_available(app_config):
         "enabled": True,
         "node_id": "node-home",
         "token": "node-test-token-with-at-least-32-characters",
-        "allowed_capabilities": ["wechat_search_messages"],
+        "allowed_capabilities": ["wechat_search_messages", "speech_to_text"],
         "heartbeat_interval_s": 20,
         "stale_after_s": 30,
         "offline_after_s": 60,
@@ -559,7 +597,7 @@ def test_status_marks_underscore_wechat_capability_available(app_config):
                 "node_id": "node-home",
                 "device_token": "node-test-token-with-at-least-32-characters",
                 "client_instance_id": "phase8-instance",
-                "capabilities": ["wechat_search_messages"],
+                "capabilities": ["wechat_search_messages", "speech_to_text"],
                 "last_completed_job_ids": [],
             })
             assert websocket.receive_json()["type"] == "node.welcome"
@@ -567,6 +605,12 @@ def test_status_marks_underscore_wechat_capability_available(app_config):
                 "/api/status", headers={"Authorization": "Bearer test-token"}
             ).json()
             assert status["capabilities"]["wechat"] == "available"
+            assert status["capabilities"]["stt"] == {
+                "available": True,
+                "location": "home_node",
+                "provider": "home-node-sensevoice",
+                "reason": "",
+            }
 
 
 def test_node_media_relay_is_separately_authenticated_and_downloadable(app_config, tmp_path):

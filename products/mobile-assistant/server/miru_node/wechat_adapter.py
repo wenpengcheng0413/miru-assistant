@@ -39,7 +39,6 @@ _MESSAGE_KINDS = {
 }
 
 _STT_LOCK = threading.Lock()
-_STT_ENGINES: dict[str, Any] = {}
 _VOICE_TRANSCRIPT_CACHE: dict[int, str] = {}
 
 
@@ -94,24 +93,12 @@ def _image_extractor_class():
 
 
 def _sensevoice_engine(model_dir: str):
-    with _STT_LOCK:
-        engine = _STT_ENGINES.get(model_dir)
-        if engine is not None:
-            return engine
-        try:
-            from miru_server.config import STTConfig
-            from miru_server.stt.sensevoice import SenseVoiceSTT
+    try:
+        from .speech import sensevoice_engine
 
-            engine = SenseVoiceSTT(STTConfig(
-                engine="sensevoice",
-                model_dir=model_dir,
-                language="auto",
-                num_threads=4,
-            ))
-        except Exception as exc:
-            raise WeChatAdapterError("wechat_stt_unavailable", "本机微信语音识别不可用") from exc
-        _STT_ENGINES[model_dir] = engine
-        return engine
+        return sensevoice_engine(model_dir)
+    except Exception as exc:
+        raise WeChatAdapterError("wechat_stt_unavailable", "本机微信语音识别不可用") from exc
 
 
 def _clean_content(value: Any, max_chars: int = 300) -> str:

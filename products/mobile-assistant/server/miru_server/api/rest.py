@@ -80,10 +80,20 @@ def build_safe_status(services) -> dict:
     cloud_tools = services.tools.enabled_names
     voice_available = services.tts_provider is not None
     voice_reason = "" if voice_available else "provider_not_configured"
-    stt_available = services.stt.name != "none"
     node = services.home_node.snapshot()
     node_online = node.state == "online"
     node_capabilities = set(node.capabilities)
+    cloud_stt_available = services.stt.name != "none"
+    node_stt_available = node_online and "speech_to_text" in node_capabilities
+    stt_available = cloud_stt_available or node_stt_available
+    stt_provider = (
+        services.stt.name if cloud_stt_available
+        else "home-node-sensevoice" if node_stt_available
+        else ""
+    )
+    stt_location = "cloud" if cloud_stt_available and cfg.is_cloud else (
+        "home_node" if node_stt_available else "server"
+    )
     wechat_available = node_online and any(
         item.startswith(("wechat.", "wechat_")) for item in node_capabilities
     )
@@ -111,8 +121,8 @@ def build_safe_status(services) -> dict:
             "attachments_metadata": "available",
             "stt": {
                 "available": stt_available,
-                "location": "cloud" if cfg.is_cloud else "server",
-                "provider": services.stt.name if stt_available else "",
+                "location": stt_location,
+                "provider": stt_provider,
                 "reason": "" if stt_available else (
                     "disabled" if cfg.stt.engine == "none" else "provider_not_configured"
                 ),

@@ -39,6 +39,15 @@ def _stt_config_ok(cfg: STTConfig) -> bool:
             return False
     if cfg.engine == "qwen":
         return bool(cfg.qwen.api_key and cfg.qwen.base_url and cfg.qwen.model)
+    if cfg.engine == "tencent":
+        provider = cfg.tencent
+        return bool(
+            provider.secret_id
+            and provider.secret_key
+            and provider.endpoint
+            and provider.engine_model
+            and provider.billing_guard == "postpay-disabled"
+        )
     return True
 
 

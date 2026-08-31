@@ -15,7 +15,7 @@
     "phase9_voice_transcription_commit": "ad77988",
     "phase9_original_image_relay_commit": "8cfd6ca",
     "phase9_media_overlay_commit": "84d3722",
-    "push_state": "Cloud STT implementation is committed locally after ddacac8; origin push and production activation remain pending",
+    "push_state": "Free-first Tencent STT plus Home Node fallback is being prepared locally; origin push and production activation remain pending",
     "dirty_worktree_preserved": true
   },
   "production": {
@@ -130,13 +130,14 @@
         "production release health, database integrity, capability handshake, and negative RPC tests",
         "Flutter format and analyze: no issues",
         "physical iPhone original-image display reported complete by user",
-        "Qwen Cloud STT provider, fail-closed production secret wiring, and offline tests implemented locally",
-        "server regression: 125 passed, 1 sandbox-only DPAPI skip",
-        "Flutter analyze: no issues; Flutter tests: 7 passed"
+        "Qwen Cloud STT provider retained as an optional disabled fallback",
+        "Tencent SentenceRecognition provider with TC3 signing and explicit postpay-disabled guard implemented locally",
+        "Home Node SenseVoice microphone fallback implemented over bounded authenticated WSS RPC",
+        "server regression: 132 passed, 1 sandbox-only DPAPI skip"
       ],
       "pending_gates": [
-        "provision Alibaba Model Studio Qwen ASR API key and preferred workspace endpoint",
-        "deploy and verify Cloud STT without exposing provider response or audio",
+        "confirm Tencent ASR postpay is disabled and provision least-privilege CAM credentials",
+        "deploy and verify free-first Cloud STT without exposing provider response, credentials, or audio",
         "physical iPhone microphone STT acceptance with Home Node offline",
         "configure and accept Cloud TTS for the complete voice loop"
       ]
@@ -155,8 +156,8 @@
     "artifact_version": "0.3.0+3",
     "artifact_sha256": "8805CCBEE0FDDDC52B35F1DE4556926EA5B4A36A8FF8E5EEC230105CB72893F0"
   },
-  "human_gate": "Provide or authorize creation of an Alibaba Model Studio Qwen ASR API key before Cloud STT production activation.",
-  "next_action": "provision the STT secret, deploy the prepared Cloud STT release, verify authenticated status/debug STT, and run physical iPhone voice acceptance before Phase 10 recovery work",
+  "human_gate": "Authorize Tencent Cloud console access when ready so ASR postpay can be confirmed disabled before least-privilege credentials are created.",
+  "next_action": "finish local verification, then configure Tencent ASR with postpay disabled, deploy the Cloud and Home Node updates, and run physical iPhone voice acceptance before Phase 10 recovery work",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,
@@ -217,7 +218,7 @@
     "flutter_analyze": "passed",
     "codemagic_build": "pending_push_authorization",
     "physical_app_acceptance": "original_image_user_reported_pass; cloud_microphone_stt_pending",
-    "cloud_stt_implementation": "local_worktree_ready; provider_secret_and_deployment_pending"
+    "cloud_stt_implementation": "tencent_free_first_with_home_node_fallback_local_worktree_ready; console_guard_credentials_and_deployment_pending"
   },
   "evidence_root": "docs/evidence/phase9/p9m1-20260831-1238-84d3722-61a2bf90"
 }

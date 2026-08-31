@@ -20,16 +20,18 @@ llm:
   max_tool_rounds: 6
 
 stt:
-  engine: qwen
-  language: auto
-  qwen:
-    # The legacy shared endpoint remains supported; a workspace-specific
-    # Beijing endpoint can replace this value later without a code change.
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key: "${MIRU_STT_API_KEY}"
-    model: qwen3-asr-flash
-    timeout_s: 30
-    enable_itn: true
+  # Credentials are intentionally not activated until Tencent ASR postpay is
+  # confirmed disabled. Home Node SenseVoice remains the zero-cost fallback.
+  engine: none
+  # Activation template after the console and CAM gates are complete:
+  # engine: tencent
+  # tencent:
+  #   endpoint: https://asr.tencentcloudapi.com
+  #   secret_id: "${MIRU_TENCENT_ASR_SECRET_ID}"
+  #   secret_key: "${MIRU_TENCENT_ASR_SECRET_KEY}"
+  #   engine_model: 16k_zh-PY
+  #   timeout_s: 30
+  #   billing_guard: "${MIRU_TENCENT_ASR_BILLING_GUARD}"
 
 tts:
   provider: none
@@ -81,6 +83,7 @@ home_node:
   token: "${MIRU_HOME_NODE_TOKEN}"
   allowed_capabilities:
     - home_node_ping
+    - speech_to_text
     - wechat_conversation_messages
     - wechat_original_images
     - wechat_search_messages

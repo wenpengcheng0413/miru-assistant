@@ -23,6 +23,7 @@ token_path: "$($tokenPath.Replace('\', '\\'))"
 journal_path: "$($journalPath.Replace('\', '\\'))"
 capabilities:
   - home_node_ping
+  - speech_to_text
   - wechat_conversation_messages
   - wechat_original_images
   - wechat_search_messages

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import json
 import logging
 import random
@@ -40,7 +41,8 @@ class HomeNodeClient:
             self.config.cloud_url,
             open_timeout=self.config.connect_timeout_s,
             close_timeout=5,
-            max_size=65_536,
+            # Cloud may send one bounded 60-second PCM16 utterance as base64.
+            max_size=3_000_000,
             ping_interval=20,
             ping_timeout=20,
         ) as websocket:
@@ -141,6 +143,35 @@ class HomeNodeClient:
                     "node_time": datetime.now(timezone.utc).isoformat(),
                 },
             }
+        if tool == "speech_to_text":
+            if not isinstance(args, dict):
+                return self._failure("invalid_tool_arguments", "语音识别参数无效", False)
+            encoded = args.get("pcm16_base64")
+            sample_rate = args.get("sample_rate")
+            if (
+                not isinstance(encoded, str)
+                or len(encoded) > 2_560_000
+                or sample_rate != 16_000
+            ):
+                return self._failure("invalid_tool_arguments", "语音识别参数超限", False)
+            try:
+                pcm16 = base64.b64decode(encoded, validate=True)
+            except (binascii.Error, ValueError):
+                return self._failure("invalid_tool_arguments", "语音数据编码无效", False)
+            try:
+                from .speech import transcribe_pcm
+
+                text = await asyncio.to_thread(
+                    transcribe_pcm,
+                    pcm16,
+                    sample_rate=sample_rate,
+                    model_dir=self.config.wechat_stt_model_dir,
+                )
+            except ValueError:
+                return self._failure("invalid_tool_arguments", "语音数据超限", False)
+            except Exception:  # noqa: BLE001 - local model failures use a stable RPC error
+                return self._failure("node_stt_unavailable", "家庭节点语音识别不可用", True)
+            return {"ok": True, "data": {"text": text[:4000]}}
         if tool in {
             "wechat_search_messages",
             "wechat_conversation_messages",

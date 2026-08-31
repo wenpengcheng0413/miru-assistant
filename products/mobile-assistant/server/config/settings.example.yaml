@@ -24,7 +24,7 @@ llm:
   max_tool_rounds: 6      # 单轮对话工具循环上限（防死循环烧钱）
 
 stt:
-  engine: sensevoice      # sensevoice | whisper | qwen | none（none=纯文本模式）
+  engine: sensevoice      # sensevoice | whisper | tencent | qwen | none
   model_dir: ./data/models/sensevoice
   language: auto          # auto/zh/yue/en（SenseVoice 单模型支持中粤英混合）
   num_threads: 4
@@ -39,6 +39,13 @@ stt:
   whisper:                # 兜底引擎（本机已有 faster-whisper 模型）
     model: small
     model_dir: ./data/models
+  tencent:                # 推荐 Cloud 主引擎：每月免费额度，关闭后付费后再启用
+    endpoint: https://asr.tencentcloudapi.com
+    secret_id: "${MIRU_TENCENT_ASR_SECRET_ID}"
+    secret_key: "${MIRU_TENCENT_ASR_SECRET_KEY}"
+    engine_model: 16k_zh-PY
+    timeout_s: 30
+    billing_guard: "${MIRU_TENCENT_ASR_BILLING_GUARD}" # 必须为 postpay-disabled
   qwen:                   # Cloud 外部 STT；音频仅在本轮内存中转为 WAV，不落盘
     base_url: "${MIRU_STT_BASE_URL}"
     api_key: "${MIRU_STT_API_KEY}"
@@ -122,6 +129,7 @@ home_node:
   token: "${MIRU_HOME_NODE_TOKEN}"  # 与 App Token 独立；Windows 使用 DPAPI 保存
   allowed_capabilities:              # 固定白名单；禁止任意命令能力
     - home_node_ping
+    - speech_to_text
     - wechat_search_messages
     - wechat_conversation_messages
     - wechat_original_images

@@ -46,5 +46,8 @@ def create_stt(cfg: STTConfig) -> STTEngine:
     if cfg.engine == "qwen":
         from .qwen_stt import QwenSTT
         return QwenSTT(cfg)
+    if cfg.engine == "tencent":
+        from .tencent_stt import TencentSTT
+        return TencentSTT(cfg)
     logger.warning("未知 stt.engine=%s，回退到 none", cfg.engine)
     return NoneSTT()

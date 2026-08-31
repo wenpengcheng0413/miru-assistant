@@ -2,10 +2,14 @@
 import asyncio
 import math
 import struct
+from types import SimpleNamespace
+
+import pytest
 
 from miru_server.api.ws import VoiceSession
 from miru_server.config import AppConfig
 from miru_server.core.pipeline import SessionContext
+from miru_server.stt.base import NoneSTT, STTUnavailable
 
 
 class _FakeWS:
@@ -113,3 +117,37 @@ async def test_non_streaming_cloud_stt_does_not_start_repeated_partial_calls():
     stt.supports_partial = False
     await voice._start_partial_loop()
     assert voice._partial_task is None
+
+
+async def test_home_node_stt_is_used_when_cloud_provider_is_unavailable():
+    cfg = AppConfig()
+    ctx = SessionContext(conversation_id="t", persona_name="p", persona=None, mode="voice")
+
+    class Registry:
+        def snapshot(self):
+            return SimpleNamespace(state="online", capabilities=("speech_to_text",))
+
+    class Rpc:
+        async def execute(self, tool_name, args, *, timeout_s):
+            assert tool_name == "speech_to_text"
+            assert args["sample_rate"] == 16_000
+            assert timeout_s == 45
+            return {"ok": True, "data": {"text": "家庭节点识别成功"}}
+
+    voice = VoiceSession(
+        ctx,
+        NoneSTT(),
+        _FakeWS(),
+        cfg,
+        node_rpc=Rpc(),
+        home_node=Registry(),
+    )
+    assert await voice._transcribe(b"\x01\x00" * 1600) == "家庭节点识别成功"
+
+
+async def test_stt_reports_stable_error_when_cloud_and_node_are_unavailable():
+    cfg = AppConfig()
+    ctx = SessionContext(conversation_id="t", persona_name="p", persona=None, mode="voice")
+    voice = VoiceSession(ctx, NoneSTT(), _FakeWS(), cfg)
+    with pytest.raises(STTUnavailable, match="家庭节点"):
+        await voice._transcribe(b"\x01\x00" * 1600)

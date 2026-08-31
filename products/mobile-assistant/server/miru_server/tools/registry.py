@@ -164,9 +164,14 @@ def build_registry(config: Any) -> ToolRegistry:
         from .builtin.wechat_node import (
             WechatConversationMessagesNodeTool,
             WechatSearchMessagesNodeTool,
+            WechatTranscribeVoiceNodeTool,
         )
 
-        tools.extend([WechatSearchMessagesNodeTool, WechatConversationMessagesNodeTool])
+        tools.extend([
+            WechatSearchMessagesNodeTool,
+            WechatConversationMessagesNodeTool,
+            WechatTranscribeVoiceNodeTool,
+        ])
     else:
         from .builtin.wechat import (
             WechatChatStatsTool,

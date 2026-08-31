@@ -8,6 +8,7 @@ import json
 import re
 from pathlib import Path
 import sys
+import threading
 import time
 from typing import Any, Callable
 
@@ -33,6 +34,10 @@ _MESSAGE_KINDS = {
     49: "app",
     10000: "system",
 }
+
+_STT_LOCK = threading.Lock()
+_STT_ENGINES: dict[str, Any] = {}
+_VOICE_TRANSCRIPT_CACHE: dict[int, str] = {}
 
 
 class WeChatAdapterError(Exception):
@@ -67,6 +72,36 @@ def _reader_class():
     return OfflineWeChatDB
 
 
+def _voice_extractor_class():
+    _reader_class()
+    try:
+        from miru.chat_analyzer.media.voice import VoiceExtractor
+    except Exception as exc:
+        raise WeChatAdapterError("wechat_voice_dependency_missing", "微信语音解码组件不可用") from exc
+    return VoiceExtractor
+
+
+def _sensevoice_engine(model_dir: str):
+    with _STT_LOCK:
+        engine = _STT_ENGINES.get(model_dir)
+        if engine is not None:
+            return engine
+        try:
+            from miru_server.config import STTConfig
+            from miru_server.stt.sensevoice import SenseVoiceSTT
+
+            engine = SenseVoiceSTT(STTConfig(
+                engine="sensevoice",
+                model_dir=model_dir,
+                language="auto",
+                num_threads=4,
+            ))
+        except Exception as exc:
+            raise WeChatAdapterError("wechat_stt_unavailable", "本机微信语音识别不可用") from exc
+        _STT_ENGINES[model_dir] = engine
+        return engine
+
+
 def _clean_content(value: Any, max_chars: int = 300) -> str:
     content = str(value or "").strip()
     if content.startswith("<?xml") or "<msg>" in content[:200]:
@@ -86,11 +121,17 @@ class WeChatNodeAdapter:
         data_root: str = "",
         *,
         reader_factory: Callable[[str], Any] | None = None,
+        voice_extractor_factory: Callable[[Any], Any] | None = None,
+        stt_factory: Callable[[str], Any] | None = None,
+        stt_model_dir: str = "./data/models/sensevoice",
         max_days: int = 90,
         max_results: int = 20,
     ) -> None:
         self.data_root = data_root
         self.reader_factory = reader_factory
+        self.voice_extractor_factory = voice_extractor_factory
+        self.stt_factory = stt_factory
+        self.stt_model_dir = stt_model_dir
         self.max_days = max(1, min(int(max_days), 90))
         self.max_results = max(1, min(int(max_results), 20))
 
@@ -294,6 +335,107 @@ class WeChatNodeAdapter:
                 "has_more": has_more,
                 "next_cursor": (
                     self._encode_cursor(consumed, contact=contact, days=days)
+                    if has_more
+                    else ""
+                ),
+            }
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+    def transcribe_voice(
+        self,
+        *,
+        contact: str,
+        days: int = 30,
+        limit: int = 10,
+        cursor: str = "",
+    ) -> dict:
+        """Decode and transcribe a bounded page of WeChat voice locally."""
+        contact = str(contact or "").strip()
+        if not (1 <= len(contact) <= 80):
+            raise WeChatAdapterError("invalid_tool_arguments", "联系人或群聊格式无效")
+        days = max(1, min(int(days), self.max_days))
+        limit = max(1, min(int(limit), min(self.max_results, 10)))
+        scope_contact = f"voice:{contact}"
+        offset = self._decode_cursor(str(cursor or ""), contact=scope_contact, days=days)
+        db = self._open()
+        try:
+            resolved = self._exact_contact(db, contact, allow_group=True)
+            username = str(resolved["username"])
+            is_group = username.endswith("@chatroom")
+            voices = [
+                item for item in self._read_window(db, username, days)
+                if int(getattr(item, "msg_type", 0) or 0) == 34
+                and int(getattr(item, "server_id", 0) or 0) > 0
+            ]
+            end = max(0, len(voices) - offset)
+            start = max(0, end - limit)
+            page = voices[start:end]
+            extractor_cls = self.voice_extractor_factory or _voice_extractor_class()
+            extractor = extractor_cls(db)
+            ids = [int(getattr(item, "server_id", 0)) for item in page]
+            try:
+                voice_data = extractor.iter_voice_ids(ids)
+            except Exception:
+                voice_data = {}
+            engine = None
+            rows = []
+            for item in page:
+                server_id = int(getattr(item, "server_id", 0))
+                transcript = _VOICE_TRANSCRIPT_CACHE.get(server_id, "")
+                error = ""
+                if not transcript:
+                    silk = voice_data.get(server_id)
+                    if not silk:
+                        error = "voice_data_missing"
+                    else:
+                        try:
+                            pcm = extractor.decode_to_pcm_cached(server_id, silk)
+                        except Exception:
+                            pcm = None
+                        if not pcm:
+                            error = "voice_decode_failed"
+                        else:
+                            if engine is None:
+                                factory = self.stt_factory or _sensevoice_engine
+                                engine = factory(self.stt_model_dir)
+                            try:
+                                # The recognizer is not assumed thread-safe. This also
+                                # prevents simultaneous voice jobs doubling peak memory.
+                                with _STT_LOCK:
+                                    transcript = str(engine.transcribe(pcm, 16000) or "").strip()
+                            except Exception:
+                                error = "voice_transcription_failed"
+                            if transcript:
+                                if len(_VOICE_TRANSCRIPT_CACHE) >= 500:
+                                    _VOICE_TRANSCRIPT_CACHE.pop(next(iter(_VOICE_TRANSCRIPT_CACHE)))
+                                _VOICE_TRANSCRIPT_CACHE[server_id] = transcript[:1000]
+                rows.append({
+                    "time": datetime.fromtimestamp(
+                        int(getattr(item, "timestamp", 0)), timezone.utc
+                    ).isoformat(),
+                    "sender": self._sender_label(
+                        item,
+                        username=username,
+                        is_group=is_group,
+                    ),
+                    "transcript": transcript[:1000],
+                    "error": error,
+                })
+            consumed = offset + len(page)
+            has_more = start > 0
+            return {
+                "contact": contact,
+                "conversation_type": "group" if is_group else "direct",
+                "days": days,
+                "voice_messages": rows,
+                "transcribed": sum(bool(item["transcript"]) for item in rows),
+                "has_more": has_more,
+                "next_cursor": (
+                    self._encode_cursor(consumed, contact=scope_contact, days=days)
                     if has_more
                     else ""
                 ),

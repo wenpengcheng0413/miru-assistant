@@ -136,7 +136,11 @@ class HomeNodeClient:
                     "node_time": datetime.now(timezone.utc).isoformat(),
                 },
             }
-        if tool in {"wechat_search_messages", "wechat_conversation_messages"}:
+        if tool in {
+            "wechat_search_messages",
+            "wechat_conversation_messages",
+            "wechat_transcribe_voice",
+        }:
             if not isinstance(args, dict):
                 return self._failure("invalid_tool_arguments", "微信搜索参数无效", False)
             from .wechat_adapter import WeChatAdapterError, WeChatNodeAdapter
@@ -145,13 +149,14 @@ class HomeNodeClient:
                 self.config.wechat_data_root,
                 max_days=self.config.wechat_max_days,
                 max_results=self.config.wechat_max_results,
+                stt_model_dir=self.config.wechat_stt_model_dir,
             )
             try:
-                method = (
-                    adapter.search_messages
-                    if tool == "wechat_search_messages"
-                    else adapter.conversation_messages
-                )
+                method = {
+                    "wechat_search_messages": adapter.search_messages,
+                    "wechat_conversation_messages": adapter.conversation_messages,
+                    "wechat_transcribe_voice": adapter.transcribe_voice,
+                }[tool]
                 data = await asyncio.to_thread(method, **args)
             except WeChatAdapterError as exc:
                 return self._failure(exc.error_code, exc.message, exc.retryable)

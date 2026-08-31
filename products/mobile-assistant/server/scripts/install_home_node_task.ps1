@@ -25,9 +25,11 @@ capabilities:
   - home_node_ping
   - wechat_conversation_messages
   - wechat_search_messages
+  - wechat_transcribe_voice
 wechat_data_root: ""
 wechat_max_days: 90
 wechat_max_results: 20
+wechat_stt_model_dir: "./data/models/sensevoice"
 connect_timeout_s: 12
 max_backoff_s: 60
 "@

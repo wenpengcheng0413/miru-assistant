@@ -19,6 +19,7 @@ class NodeClientConfig(BaseModel):
     wechat_data_root: str = ""
     wechat_max_days: int = Field(default=90, ge=1, le=90)
     wechat_max_results: int = Field(default=20, ge=1, le=20)
+    wechat_stt_model_dir: str = "./data/models/sensevoice"
     connect_timeout_s: float = Field(default=12.0, ge=3, le=60)
     max_backoff_s: float = Field(default=60.0, ge=5, le=300)
 
@@ -43,6 +44,9 @@ class NodeClientConfig(BaseModel):
             self.wechat_data_root = str(
                 Path(os.path.expandvars(self.wechat_data_root)).expanduser()
             )
+        self.wechat_stt_model_dir = str(
+            Path(os.path.expandvars(self.wechat_stt_model_dir)).expanduser()
+        )
 
     @classmethod
     def load(cls, path: str | Path) -> "NodeClientConfig":

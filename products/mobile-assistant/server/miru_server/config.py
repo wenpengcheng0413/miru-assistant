@@ -209,6 +209,7 @@ class AppConfig(BaseModel):
             remote_node_tools = {
                 "wechat_search_messages",
                 "wechat_conversation_messages",
+                "wechat_transcribe_voice",
             } if self.home_node.enabled else set()
             self.tools.enabled = [
                 name for name in self.tools.enabled

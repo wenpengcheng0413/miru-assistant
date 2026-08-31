@@ -18,6 +18,7 @@ from miru_server.tools.base import ToolContext
 from miru_server.tools.builtin.wechat_node import (
     WechatConversationMessagesNodeTool,
     WechatSearchMessagesNodeTool,
+    WechatTranscribeVoiceNodeTool,
 )
 from miru_server.tools.registry import ToolRegistry
 
@@ -115,6 +116,24 @@ class _FakeReader:
         self.closed = True
 
 
+class _FakeVoiceExtractor:
+    def __init__(self, _db):
+        pass
+
+    def iter_voice_ids(self, server_ids):
+        return {server_id: b"fake-silk" for server_id in server_ids}
+
+    def decode_to_pcm_cached(self, _server_id, _silk):
+        return b"\x00\x00" * 1600
+
+
+class _FakeStt:
+    def transcribe(self, pcm, sample_rate):
+        assert pcm
+        assert sample_rate == 16000
+        return "本机转写结果"
+
+
 def test_wechat_adapter_is_exact_bounded_and_value_scoped():
     adapter = WeChatNodeAdapter(
         reader_factory=_FakeReader,
@@ -188,6 +207,24 @@ def test_wechat_conversation_rejects_cursor_from_another_scope():
     assert exc.value.error_code == "invalid_cursor"
 
 
+def test_wechat_voice_is_transcribed_locally_without_raw_media_or_ids():
+    adapter = WeChatNodeAdapter(
+        reader_factory=_FakeReader,
+        voice_extractor_factory=_FakeVoiceExtractor,
+        stt_factory=lambda _model_dir: _FakeStt(),
+    )
+    result = adapter.transcribe_voice(contact="Test Group", days=30, limit=10)
+    assert result["conversation_type"] == "group"
+    assert result["transcribed"] == 1
+    assert result["voice_messages"][0]["sender"] == "self"
+    assert result["voice_messages"][0]["transcript"] == "本机转写结果"
+    assert result["voice_messages"][0]["error"] == ""
+    encoded = str(result)
+    assert "fake-silk" not in encoded
+    assert "server_id" not in encoded
+    assert "wxid" not in encoded
+
+
 @pytest.mark.asyncio
 async def test_node_client_executes_only_allowlisted_wechat_search(tmp_path, monkeypatch):
     config = NodeClientConfig(
@@ -198,6 +235,7 @@ async def test_node_client_executes_only_allowlisted_wechat_search(tmp_path, mon
             "home_node_ping",
             "wechat_conversation_messages",
             "wechat_search_messages",
+            "wechat_transcribe_voice",
         ],
     )
     client = HomeNodeClient(config)
@@ -223,6 +261,16 @@ async def test_node_client_executes_only_allowlisted_wechat_search(tmp_path, mon
     })
     assert page["ok"] is True
     assert page["data"]["contact"] == "Test Group"
+    monkeypatch.setattr(
+        WeChatNodeAdapter,
+        "transcribe_voice",
+        lambda self, **kwargs: {"voice_messages": [], "transcribed": 0, **kwargs},
+    )
+    voice = await client._run_job({
+        "tool": "wechat_transcribe_voice",
+        "args": {"contact": "Test Group", "days": 7, "limit": 1, "cursor": ""},
+    })
+    assert voice["ok"] is True
     denied = await client._run_job({"tool": "wechat_recent_messages", "args": {}})
     assert denied["error_code"] == "node_capability_unavailable"
 
@@ -317,7 +365,10 @@ def test_phase8_production_allowlist_contains_only_read_capability():
     assert "  - wechat_conversation_messages" in installer
     assert "wechat_max_days: 90" in installer
     assert "wechat_max_results: 20" in installer
-    for forbidden in ["wechat_recent_messages", "wechat_transcribe_voice", "wechat_image_analysis"]:
+    assert settings.count("- wechat_transcribe_voice") == 2
+    assert "  - wechat_transcribe_voice" in installer
+    assert "wechat_stt_model_dir: \"./data/models/sensevoice\"" in installer
+    for forbidden in ["wechat_recent_messages", "wechat_image_analysis"]:
         assert f"  - {forbidden}" not in installer
     assert "miru_server/config.py" in dockerfile
     assert "miru_server/api/rest.py" in dockerfile

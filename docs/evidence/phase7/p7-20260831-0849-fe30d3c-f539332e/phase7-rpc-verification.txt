@@ -44,5 +44,5 @@ post_cloud_restart_real_rpc=passed
 windows_node_restart_reconnect=passed
 post_node_restart_real_rpc=passed
 
-PENDING HUMAN ACCEPTANCE
-physical_iPhone_home_node_ping=not_yet_confirmed
+PHYSICAL IPHONE ACCEPTANCE
+physical_iPhone_home_node_ping=passed

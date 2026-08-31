@@ -1,7 +1,7 @@
 # Phase 7 — `home_node_ping` execution report
 
-Status: **AUTOMATED PASS — PHYSICAL APP GATE PENDING**
-Updated: 2026-08-31 08:58 CST
+Status: **PASS**
+Completed: 2026-08-31 09:02 CST
 
 The first Cloud-to-Windows RPC is implemented and active in production. It is
 a fixed, read-only liveness probe and cannot execute commands or read local
@@ -36,10 +36,14 @@ files, WeChat data, or media.
 - The same real RPC passed again after a Cloud API restart and after a Windows
   Home Node task restart.
 
-## Mandatory gate remaining
+## Physical iPhone acceptance
 
-On the physical iPhone, ask Miru to check the Home Node using
-`home_node_ping`. Confirm it reports that the node is online and responding.
+The user called `home_node_ping` from the physical iPhone and confirmed the
+production Home Node response passed.
+
+## Mandatory gates remaining
+
+None. Phase 8 may proceed.
 
 ## Rollback
 

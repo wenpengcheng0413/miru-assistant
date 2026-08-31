@@ -1,0 +1,62 @@
+Miru Phase 8 WeChat read-only search verification
+Recorded: 2026-08-31 11:16 CST
+
+SOURCE AND TESTS
+implementation_commit=96620b7738aa03e1c6fc9b8f5a6e12b13efdca82
+status_fix_commit=fca4b1ad2b6358eb0603ff4818d08a9f585db93e
+phase8_targeted=7 passed
+server_regression=112 passed, 1 skipped
+dpapi_skip_reason=sandbox profile only; real Windows DPAPI test previously passed
+powershell_parser_errors=0
+compileall=passed
+
+WINDOWS READER DIAGNOSTIC
+account_found=true
+contact_count=12750
+readable_message_shards=6
+database_key_count=21
+sanitized_diagnostic_unexpected_log_lines=0
+contact_names_printed=false
+message_contents_read_or_printed=false
+
+PRIVACY BOUNDARY
+mode=scheme A; request-scoped read only
+supported_scope=one-to-one exact contact plus required keyword
+default_days=30
+maximum_days=90
+maximum_results=20
+maximum_content_chars_per_result=300
+fuzzy_contact_match=false
+group_chat=false
+media=false
+raw_database_upload=false
+database_key_upload=false
+arbitrary_path_read=false
+legacy_reader_default_log_sink=disabled before import
+
+PRODUCTION RELEASE
+active_release=p8r1-20260831-0916-fca4b1a-b19a035e
+immediate_rollback_release=p8-20260831-0911-96620b7-20b3f8ae
+last_fully_accepted_release=p7-20260831-0849-fe30d3c-f539332e
+release_archive_sha256=4c11c5a6a1c4d203086465d8c0c7d36d37acbebd7dfbf161c787395395847d8c
+image_id=sha256:78c6a2808b227cf90e5d61a40c76dcbf009274ceb817091fb5716d3903e7fe56
+pre_activation_database_sha256=10e1c5ea96f11885055b082ec8c96787f2e89013ddff84dc056ea40ad65baea7
+api_health=healthy
+caddy_health=healthy
+database_integrity=ok
+cloud_state=ready
+home_node_state=online
+accepted_capabilities=home_node_ping,wechat_search_messages
+wechat_status=available
+
+REAL NEGATIVE PRODUCTION TEST
+synthetic_conversation_created=passed
+llm_invoked_wechat_node_proxy=passed
+unknown_contact_failed_safely=passed
+synthetic_conversation_removed=passed
+sensitive_marker_in_home_node_log=false
+sensitive_marker_in_cloud_log=false
+secret_leak_in_cloud_log=false
+
+PENDING HUMAN ACCEPTANCE
+physical_iPhone_real_contact_keyword_search=not_yet_confirmed

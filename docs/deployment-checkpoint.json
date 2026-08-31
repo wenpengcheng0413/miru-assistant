@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-31T09:02:00+08:00",
+  "updated_at": "2026-08-31T11:16:06+08:00",
   "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
   "git": {
     "branch": "master",
@@ -9,13 +9,16 @@
     "phase6_implementation_commit": "2afc75aa7ec643a0b0a1831a796ed41b4ad63e76",
     "phase6_task_runner_fix_commit": "421b9600c4aa87d4ea573742c1c37f9f4849d1d5",
     "phase7_implementation_commit": "fe30d3c869409c761f69e2c842acc26ff751e380",
-    "push_state": "phase6_and_phase7_commits_local; origin master push awaiting explicit authorization",
+    "phase8_implementation_commit": "96620b7738aa03e1c6fc9b8f5a6e12b13efdca82",
+    "phase8_status_fix_commit": "fca4b1ad2b6358eb0603ff4818d08a9f585db93e",
+    "push_state": "phase6_through_phase8_commits_local; origin master push awaiting explicit authorization",
     "dirty_worktree_preserved": true
   },
   "production": {
     "state": "healthy",
-    "active_release": "p7-20260831-0849-fe30d3c-f539332e",
-    "rollback_release": "p6-20260831-0745-2afc75a-03ae6b12",
+    "active_release": "p8r1-20260831-0916-fca4b1a-b19a035e",
+    "rollback_release": "p8-20260831-0911-96620b7-20b3f8ae",
+    "last_fully_accepted_release": "p7-20260831-0849-fe30d3c-f539332e",
     "access": "tailscale-private-https-wss",
     "funnel": "off",
     "public_business_ports": "none"
@@ -89,7 +92,27 @@
       ],
       "pending_gates": []
     },
-    "8": "pending",
+    "8": {
+      "state": "in_progress",
+      "completed_gates": [
+        "Windows-only privacy-scoped WeChat reader adapter",
+        "exact one-to-one contact and required-keyword boundary",
+        "30-day default and 90-day maximum search window",
+        "20-result and 300-character-per-content caps",
+        "sender identifier, path, XML media, and legacy logger redaction",
+        "real Windows reader access to contacts, six shards, and local keys without content output",
+        "Cloud-to-Node wechat_search_messages proxy and dynamic schema",
+        "server regression: 112 passed, 1 sandbox-only DPAPI skip",
+        "production activation, status correction, backup, health, and rollback",
+        "real unknown-contact negative RPC and synthetic conversation cleanup",
+        "Cloud and node log sensitive-marker scans"
+      ],
+      "pending_gates": [
+        "physical iPhone real-contact keyword-search acceptance",
+        "bounded contact lookup, recent messages, and statistics",
+        "explicit decision and acceptance for optional scheme-B summary synchronization"
+      ]
+    },
     "9": "pending",
     "10": "pending"
   },
@@ -105,8 +128,8 @@
     "artifact_version": "0.3.0+3",
     "artifact_sha256": "8805CCBEE0FDDDC52B35F1DE4556926EA5B4A36A8FF8E5EEC230105CB72893F0"
   },
-  "human_gate": null,
-  "next_action": "implement Phase 8 privacy-scoped read-only wechat_search_messages over the proven Home Node RPC, keeping raw databases and keys on Windows",
+  "human_gate": "On the physical iPhone, call wechat_search_messages with one real exact contact and a known keyword; the contact and keyword do not need to be disclosed in evidence.",
+  "next_action": "complete the physical positive WeChat search gate, then extend the same privacy boundary to bounded contact lookup, recent messages, and statistics",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,
@@ -146,5 +169,15 @@
     "automated_verification": "passed",
     "physical_app_acceptance": "passed"
   },
-  "evidence_root": "docs/evidence/phase7/p7-20260831-0849-fe30d3c-f539332e"
+  "phase8": {
+    "release_archive_sha256": "4c11c5a6a1c4d203086465d8c0c7d36d37acbebd7dfbf161c787395395847d8c",
+    "image_id": "sha256:78c6a2808b227cf90e5d61a40c76dcbf009274ceb817091fb5716d3903e7fe56",
+    "pre_activation_database_sha256": "10e1c5ea96f11885055b082ec8c96787f2e89013ddff84dc056ea40ad65baea7",
+    "home_node_state": "online",
+    "accepted_capabilities": ["home_node_ping", "wechat_search_messages"],
+    "wechat_status": "available",
+    "automated_minimum_slice": "passed",
+    "physical_positive_search": "pending"
+  },
+  "evidence_root": "docs/evidence/phase8/p8r1-20260831-0916-fca4b1a-b19a035e"
 }

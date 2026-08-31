@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from miru_node.client import HomeNodeClient
 from miru_node.config import NodeClientConfig
@@ -253,6 +256,89 @@ def test_wechat_original_image_extracts_only_exact_reference():
     assert image["media_type"] == "image/jpeg"
     assert image["_bytes"].startswith(b"\xff\xd8\xff")
     assert image["_extension"] == ".jpg"
+
+
+def test_wechat_original_image_prefers_high_definition_and_falls_back_without_md5(tmp_path):
+    regular = tmp_path / "candidate.dat"
+    high = tmp_path / "candidate_h.dat"
+    thumb = tmp_path / "candidate_t.dat"
+    for path in (regular, high, thumb):
+        path.write_bytes(b"dat")
+
+    class Reader(_FakeReader):
+        def read_messages_since(self, table: str, shard: str, since: int):
+            return [SimpleNamespace(
+                timestamp=int(high.stat().st_mtime),
+                server_id=9,
+                sender_username="self-secret-wxid",
+                sender="我",
+                msg_type=3,
+                content="[图片]",
+                raw_content="",
+            )]
+
+    class Extractor:
+        def __init__(self, _account_dir):
+            pass
+
+        def locate_files(self, *_args):
+            return [regular, high]
+
+        def locate_thumb(self, *_args):
+            return [thumb]
+
+        def decrypt(self, path):
+            return b"\xff\xd8\xff" + path.stem.encode()
+
+        def sniff_format(self, _data):
+            return "jpg"
+
+    result = WeChatNodeAdapter(
+        reader_factory=Reader,
+        image_extractor_factory=Extractor,
+    ).extract_original_images(contact="Test Group", days=30, limit=1)
+    image = result["images"][0]
+    assert image["_bytes"] == b"\xff\xd8\xffcandidate_h"
+    assert image["match"].endswith("high_definition")
+
+
+@pytest.mark.asyncio
+async def test_cloud_analyzes_relayed_original_image(app_config, tmp_path):
+    media_id = "a" * 32
+    root = app_config.resolve(app_config.attachments.dir) / "node-media"
+    root.mkdir(parents=True)
+    image_path = root / f"{media_id}.png"
+    Image.new("RGB", (32, 24), "white").save(image_path)
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
+    (root / f"{media_id}.json").write_text(json.dumps({
+        "conversation_id": "conversation-1",
+        "file_name": image_path.name,
+        "expires_at": expires.isoformat(),
+    }), encoding="utf-8")
+
+    class Rpc:
+        async def execute(self, *_args, **_kwargs):
+            return {"ok": True, "data": {"images": [{
+                "id": media_id,
+                "download_path": f"/api/node-media/{media_id}",
+            }]}}
+
+    class Llm:
+        async def vision_chat(self, messages, **_kwargs):
+            assert any(
+                block.get("type") == "image_url"
+                for block in messages[0]["content"]
+            )
+            return "图片里是一段可确认的测试内容"
+
+    services = SimpleNamespace(config=app_config, node_rpc=Rpc(), llm=Llm())
+    result = await WechatOriginalImagesNodeTool().run(
+        ToolContext(services=services, conversation_id="conversation-1"),
+        contact="Test Group",
+    )
+    assert result.ok is True
+    assert result.data["analyzed"] == 1
+    assert result.data["images"][0]["description"] == "图片里是一段可确认的测试内容"
 
 
 @pytest.mark.asyncio

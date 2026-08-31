@@ -74,6 +74,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _openRemoteImage(RemoteImage item) async {
+    final url = '${c.config.restBaseUrl}${item.downloadPath}';
+    await showDialog<void>(
+      context: context,
+      useSafeArea: false,
+      builder: (context) => Dialog.fullscreen(
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('微信原图'),
+            leading: IconButton(
+              tooltip: '关闭',
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+          backgroundColor: Colors.black,
+          body: Center(
+            child: InteractiveViewer(
+              minScale: 0.8,
+              maxScale: 6,
+              child: Image.network(
+                url,
+                headers: {'Authorization': 'Bearer ${c.config.token}'},
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, progress) => progress == null
+                    ? child
+                    : const CircularProgressIndicator(),
+                errorBuilder: (context, error, stackTrace) => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    '原图已过期或暂时无法加载，请重新向 Miru 请求这张图片。',
+                    style: TextStyle(color: Colors.white),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _pickImage(ImageSource source) async {
     // 不限制宽高，且使用插件支持的最高质量；避免此前 92% 质量造成的细节损失。
     final image = await _imagePicker.pickImage(
@@ -369,30 +412,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          '${c.config.restBaseUrl}${item.downloadPath}',
-                          headers: {
-                            'Authorization': 'Bearer ${c.config.token}',
-                          },
-                          fit: BoxFit.contain,
-                          loadingBuilder: (context, child, progress) =>
-                              progress == null
-                                  ? child
-                                  : const SizedBox(
-                                      height: 120,
-                                      child: Center(
-                                        child: CircularProgressIndicator(),
-                                      ),
-                                    ),
-                          errorBuilder: (context, error, stackTrace) =>
-                              const SizedBox(
-                            height: 90,
-                            child: Center(
-                              child: Text('原图已过期或暂时无法加载'),
+                      GestureDetector(
+                        onTap: () => _openRemoteImage(item),
+                        child: Stack(
+                          alignment: Alignment.bottomRight,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.network(
+                                '${c.config.restBaseUrl}${item.downloadPath}',
+                                headers: {
+                                  'Authorization': 'Bearer ${c.config.token}',
+                                },
+                                fit: BoxFit.contain,
+                                loadingBuilder: (context, child, progress) =>
+                                    progress == null
+                                        ? child
+                                        : const SizedBox(
+                                            height: 120,
+                                            child: Center(
+                                              child:
+                                                  CircularProgressIndicator(),
+                                            ),
+                                          ),
+                                errorBuilder: (context, error, stackTrace) =>
+                                    const SizedBox(
+                                  height: 90,
+                                  child: Center(
+                                    child: Text('原图已过期或暂时无法加载'),
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: CircleAvatar(
+                                radius: 16,
+                                child: Icon(Icons.open_in_full, size: 17),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       if (item.sender.isNotEmpty || item.messageTime.isNotEmpty)

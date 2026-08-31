@@ -376,7 +376,7 @@ class ChatController extends ChangeNotifier {
         ),
       );
       final resp = await dio.get(
-        '${config.restBaseUrl}/api/conversations/$conversationId/messages?limit=100',
+        '${config.restBaseUrl}/api/conversations/$conversationId/messages?limit=500',
         options: Options(headers: {'Authorization': 'Bearer ${config.token}'}),
       );
       final rows = (resp.data as List?) ?? const [];

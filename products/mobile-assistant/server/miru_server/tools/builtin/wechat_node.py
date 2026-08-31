@@ -1,8 +1,75 @@
 """Cloud proxy tools for privacy-scoped Home Node WeChat reads."""
 from __future__ import annotations
 
-from ..base import Tool, ToolContext, ToolResult
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+from ...attachments import image_metadata, vision_image_blocks
 from ...node_rpc import NodeRpcError
+from ..base import Tool, ToolContext, ToolResult
+
+
+_MEDIA_ID = re.compile(r"^[a-f0-9]{32}$")
+
+
+def _node_media_path(ctx: ToolContext, item: dict) -> Path | None:
+    media_id = str(item.get("id") or "")
+    if not _MEDIA_ID.fullmatch(media_id):
+        return None
+    root = (
+        ctx.services.config.resolve(ctx.services.config.attachments.dir)
+        / "node-media"
+    ).resolve()
+    meta_path = root / f"{media_id}.json"
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        expires = datetime.fromisoformat(str(meta.get("expires_at") or ""))
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires <= datetime.now(timezone.utc):
+            return None
+        if str(meta.get("conversation_id") or "") != ctx.conversation_id:
+            return None
+        path = (root / str(meta.get("file_name") or "")).resolve()
+    except Exception:
+        return None
+    return path if path.is_file() and path.parent == root else None
+
+
+async def _analyze_node_image(ctx: ToolContext, item: dict) -> None:
+    path = _node_media_path(ctx, item)
+    if path is None:
+        item["analyzed"] = False
+        item["analysis_error"] = "原图不可用于视觉分析"
+        return
+    try:
+        metadata = image_metadata(path)
+        prompt = (
+            "请用中文客观分析这张微信原图的具体含义。先看全图，再结合高清局部，"
+            "逐项识别人、物体、场景、界面状态和文字；文字请尽量准确转写。"
+            f"图片像素为 {metadata.get('width') or '未知'}×{metadata.get('height') or '未知'}。"
+            "区分可确认事实与推测；像素不足时明确说看不清，禁止猜测。控制在 400 字以内。"
+        )
+        description = await ctx.services.llm.vision_chat(
+            [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    *vision_image_blocks(path),
+                ],
+            }],
+            model=ctx.services.config.llm.vision_model,
+            max_tokens=700,
+        )
+        item["description"] = description
+        item["analyzed"] = bool(description)
+        if not description:
+            item["analysis_error"] = "视觉模型返回空内容"
+    except Exception as exc:
+        item["analyzed"] = False
+        item["analysis_error"] = f"视觉模型分析失败：{str(exc)[:120]}"
 
 
 class WechatSearchMessagesNodeTool(Tool):
@@ -209,7 +276,8 @@ class WechatOriginalImagesNodeTool(Tool):
     description = (
         "按需从 Windows Home Node 提取指定联系人或群聊的微信原图。"
         "原图通过加密连接传到 Cloud 的短期媒体区，24 小时后自动过期；"
-        "返回可由 Miru App 鉴权显示的图片。用户要求照片、图片、截图或完整聊天媒体时使用。"
+        "Cloud 会使用视觉模型逐张分析具体内容，并返回可由 Miru App 鉴权显示、点击放大的图片。"
+        "用户要求照片、图片、截图、图中文字/含义或完整聊天媒体时必须使用。"
     )
     parameters = {
         "type": "object",
@@ -270,7 +338,13 @@ class WechatOriginalImagesNodeTool(Tool):
                 retryable=False,
             )
         visible = [item for item in data.get("images", []) if item.get("download_path")]
+        for item in visible:
+            await _analyze_node_image(ctx, item)
+        data["analyzed"] = sum(bool(item.get("analyzed")) for item in visible)
         return ToolResult.success(
             data,
-            summary=f"已提取并临时提供微信原图 {len(visible)} 张（24 小时有效）",
+            summary=(
+                f"已提取微信原图 {len(visible)} 张并分析 {data['analyzed']} 张"
+                "（原图链接 24 小时有效）"
+            ),
         )

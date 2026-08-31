@@ -14,12 +14,19 @@ def test_kv_scopes(services):
 
 def test_projects_and_knowledge(services):
     store = services.memory
-    store.set("projects", "Miru", "后端 MVP 阶段")
+    store.set("projects", "Miru", "后端 MVP 阶段", notes="旧备注")
     store.set("knowledge", "", "用户每周三晚上开组会", source="user")
     projects = store.list("projects")
     assert projects[0]["name"] == "Miru" and projects[0]["status"] == "后端 MVP 阶段"
+    store.set("projects", "Miru", "云端验收阶段", notes="新备注")
+    assert store.get("projects", "Miru") == {
+        "name": "Miru", "status": "云端验收阶段", "notes": "新备注"
+    }
     knowledge = store.list("knowledge")
     assert any("开组会" in k["content"] for k in knowledge)
+    knowledge_id = str(knowledge[0]["id"])
+    store.set("knowledge", knowledge_id, "用户每周四晚上开组会", source="user")
+    assert store.get("knowledge", knowledge_id)["content"] == "用户每周四晚上开组会"
 
 
 def test_search(services):

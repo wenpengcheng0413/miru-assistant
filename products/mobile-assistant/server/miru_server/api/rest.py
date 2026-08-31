@@ -371,6 +371,7 @@ async def memory_list(request: Request, scope: str = "profile", q: str = ""):
 
 class MemoryPut(BaseModel):
     value: str
+    notes: str | None = None
 
 
 @router.put("/memory/{scope}/{key:path}")
@@ -378,7 +379,7 @@ async def memory_put(request: Request, scope: str, key: str, body: MemoryPut):
     s = _svc(request)
     if scope not in MEMORY_SCOPES:
         raise HTTPException(400, "scope 非法")
-    await asyncio.to_thread(s.memory.set, scope, key, body.value, "user")
+    await asyncio.to_thread(s.memory.set, scope, key, body.value, "user", body.notes)
     return {"ok": True, "scope": scope, "key": key}
 
 

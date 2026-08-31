@@ -39,7 +39,14 @@ class MemoryStore:
                 return {"id": row.id, "content": row.content, "source": row.source} if row else None
             raise ValueError(f"未知记忆 scope: {scope}")
 
-    def set(self, scope: str, key: str, value: str, source: str = "user") -> None:
+    def set(
+        self,
+        scope: str,
+        key: str,
+        value: str,
+        source: str = "user",
+        notes: str | None = None,
+    ) -> None:
         with self._db() as s:
             if scope in KEY_VALUE_SCOPES:
                 model = KEY_VALUE_SCOPES[scope]
@@ -53,10 +60,20 @@ class MemoryStore:
                 row = s.scalar(select(MemoryProject).where(MemoryProject.name == key))
                 if row:
                     row.status = value
+                    if notes is not None:
+                        row.notes = notes
                 else:
-                    s.add(MemoryProject(name=key, status=value))
+                    s.add(MemoryProject(name=key, status=value, notes=notes or ""))
             elif scope == "knowledge":
-                s.add(MemoryKnowledge(content=value, source=source))
+                try:
+                    row = s.get(MemoryKnowledge, int(key))
+                except (TypeError, ValueError):
+                    row = None
+                if row:
+                    row.content = value
+                    row.source = source
+                else:
+                    s.add(MemoryKnowledge(content=value, source=source))
             else:
                 raise ValueError(f"未知记忆 scope: {scope}")
             s.commit()

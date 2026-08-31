@@ -1,15 +1,18 @@
 """Privacy-scoped read-only WeChat adapter executed only on Windows."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import base64
 import hashlib
 import json
+import os
 import re
-from pathlib import Path
+import shutil
+import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -130,6 +133,54 @@ def _image_md5(value: Any) -> str:
     if not match:
         match = re.search(r"\b([a-fA-F0-9]{32})\b", raw)
     return match.group(1).lower() if match else ""
+
+
+def _image_source(path: Path) -> str:
+    stem = path.stem.lower()
+    if stem.endswith("_h"):
+        return "high_definition"
+    if stem.endswith("_t"):
+        return "thumbnail"
+    return "original"
+
+
+def _image_candidate_key(path: Path, timestamp: float) -> tuple[int, int, float, int]:
+    """Prefer HD/original variants while using time distance to prevent cross-image matches."""
+    tier = {"high_definition": 0, "original": 1, "thumbnail": 2}[_image_source(path)]
+    try:
+        stat = path.stat()
+        delta = abs(stat.st_mtime - timestamp)
+        return int(delta // 300), tier, delta, -stat.st_size
+    except OSError:
+        # Test doubles and transient files may not expose stat; retain deterministic
+        # quality ordering and let decrypt() decide whether the candidate is usable.
+        return 10**12, tier, 10**12, 0
+
+
+def _decode_wxgf_to_jpeg(data: bytes) -> bytes | None:
+    """Decode WeChat's WXGF/HEVC original locally before it leaves the Home Node."""
+    start = data.find(b"\x00\x00\x00\x01")
+    if start < 0 or not shutil.which("ffmpeg"):
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-f", "hevc", "-i", "-", "-frames:v", "1",
+                "-f", "image2pipe", "-vcodec", "mjpeg", "-",
+            ],
+            input=data[start:],
+            capture_output=True,
+            timeout=45,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (
+        result.stdout
+        if result.returncode == 0 and result.stdout.startswith(b"\xff\xd8\xff")
+        else None
+    )
 
 
 class WeChatNodeAdapter:
@@ -499,6 +550,7 @@ class WeChatNodeAdapter:
             except Exception as exc:
                 raise WeChatAdapterError("wechat_image_unavailable", "本机微信原图读取不可用") from exc
             rows = []
+            used: set[Path] = set()
             for item in page:
                 timestamp = int(getattr(item, "timestamp", 0))
                 md5 = _image_md5(getattr(item, "content", "")) or _image_md5(
@@ -514,26 +566,55 @@ class WeChatNodeAdapter:
                     "_bytes": b"",
                     "_extension": "",
                 }
-                if not md5:
-                    row["error"] = "image_reference_missing"
-                    rows.append(row)
-                    continue
                 try:
                     candidates = extractor.locate_files(username, timestamp, md5)
+                    locate_thumb = getattr(extractor, "locate_thumb", None)
+                    if callable(locate_thumb):
+                        candidates += [
+                            path for path in locate_thumb(username, timestamp, md5)
+                            if path not in candidates
+                        ]
                     exact = [
                         path for path in candidates
                         if path.stem == md5 or path.stem.startswith(f"{md5}_")
-                    ]
-                    exact.sort(key=lambda path: 0 if path.stem.endswith("_h") else 1)
-                    selected = exact[0] if exact else extractor.pick_by_time(
-                        candidates,
-                        timestamp,
-                        window_s=3600,
+                    ] if md5 else []
+                    # A filename MD5 match is stronger evidence than mtime.  Keep
+                    # exact variants together and choose HD/original quality
+                    # inside that group; only use time matching when WeChat did
+                    # not retain a usable exact candidate.
+                    ordered = sorted(
+                        exact,
+                        key=lambda path: _image_candidate_key(path, timestamp),
                     )
-                    data = extractor.decrypt(selected) if selected else None
-                    extension = extractor.sniff_format(data or b"") if data else ""
-                    row["match"] = "md5_exact" if exact else (
-                        "time_nearest_1h" if selected else ""
+                    ordered += sorted(
+                        (path for path in candidates if path not in exact),
+                        key=lambda path: _image_candidate_key(path, timestamp),
+                    )
+                    data, extension, selected = None, "", None
+                    for candidate in ordered:
+                        if candidate in used:
+                            continue
+                        try:
+                            delta = abs(os.path.getmtime(candidate) - timestamp)
+                        except OSError:
+                            delta = 0 if candidate in exact else 10**12
+                        if candidate not in exact and delta > 3600:
+                            continue
+                        candidate_data = extractor.decrypt(candidate)
+                        if not candidate_data:
+                            continue
+                        candidate_extension = extractor.sniff_format(candidate_data)
+                        if candidate_extension == "wxgf":
+                            candidate_data = _decode_wxgf_to_jpeg(candidate_data)
+                            candidate_extension = "jpg" if candidate_data else ""
+                        if candidate_extension not in {"jpg", "png", "gif", "webp"}:
+                            continue
+                        data, extension, selected = candidate_data, candidate_extension, candidate
+                        used.add(candidate)
+                        break
+                    row["match"] = (
+                        "md5_exact" if selected in exact else
+                        (f"time_nearest_1h_{_image_source(selected)}" if selected else "")
                     )
                 except Exception:
                     data, extension = None, ""

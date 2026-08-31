@@ -1,0 +1,6 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+COPY --chown=miru:miru server/miru_server/api/rest.py /app/miru_server/api/rest.py
+COPY --chown=miru:miru server/miru_server/memory/store.py /app/miru_server/memory/store.py
+COPY --chown=miru:miru server/miru_server/tools/builtin/wechat_node.py /app/miru_server/tools/builtin/wechat_node.py

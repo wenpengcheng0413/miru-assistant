@@ -488,7 +488,7 @@ class _CostPanelState extends State<_CostPanel> {
       );
 }
 
-/// 记忆面板：/api/memory?scope=profile
+/// 记忆面板：管理画像、偏好、项目和知识四类长期记忆。
 class _MemoryPanel extends StatefulWidget {
   const _MemoryPanel({super.key, required this.headers, required this.baseUrl});
 
@@ -500,7 +500,25 @@ class _MemoryPanel extends StatefulWidget {
 }
 
 class _MemoryPanelState extends State<_MemoryPanel> {
-  String _text = '加载中…';
+  static const _scopeLabels = <String, String>{
+    'profile': '个人画像',
+    'preferences': '偏好',
+    'projects': '项目',
+    'knowledge': '知识',
+  };
+
+  String _scope = 'profile';
+  List<_MemoryEntry> _entries = const [];
+  bool _loading = true;
+  String _error = '';
+
+  Dio get _api => Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 12),
+          headers: widget.headers,
+        ),
+      );
 
   @override
   void initState() {
@@ -509,39 +527,259 @@ class _MemoryPanelState extends State<_MemoryPanel> {
   }
 
   Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
     try {
-      final dio = Dio(
-        BaseOptions(
-          connectTimeout: const Duration(seconds: 8),
-          receiveTimeout: const Duration(seconds: 12),
-        ),
+      final resp = await _api.get(
+        '${widget.baseUrl}/api/memory',
+        queryParameters: {'scope': _scope},
       );
-      final resp = await dio.get(
-        '${widget.baseUrl}/api/memory?scope=profile',
-        options: Options(headers: widget.headers),
-      );
-      final entries = (resp.data['entries'] as List?) ?? [];
+      final rows = (resp.data['entries'] as List?) ?? const [];
+      if (!mounted) return;
       setState(() {
-        _text = entries.isEmpty
-            ? '（空）'
-            : entries.map((e) => '${e['key']} = ${e['value']}').join('\n');
+        _entries = rows
+            .whereType<Map>()
+            .map((row) => _MemoryEntry.fromJson(_scope, row))
+            .toList();
+        _loading = false;
       });
     } catch (e) {
-      setState(() => _text = '加载失败：${friendlyNetError(e)}');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '加载失败：${friendlyNetError(e)}';
+      });
     }
   }
 
-  void _reload() {
-    setState(() => _text = '加载中…');
-    _load();
+  String _entryUrl(_MemoryEntry entry) =>
+      '${widget.baseUrl}/api/memory/${entry.scope}/${Uri.encodeComponent(entry.key)}';
+
+  Future<void> _edit(_MemoryEntry entry) async {
+    final value = TextEditingController(text: entry.value);
+    final notes = TextEditingController(text: entry.notes);
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('修改${_scopeLabels[entry.scope]}记忆'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(entry.title, style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 12),
+              TextField(
+                controller: value,
+                autofocus: true,
+                minLines: 2,
+                maxLines: 8,
+                decoration: InputDecoration(
+                  labelText: entry.scope == 'projects' ? '项目状态' : '记忆内容',
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              if (entry.scope == 'projects') ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: notes,
+                  minLines: 2,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    labelText: '项目备注',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (save != true || value.text.trim().isEmpty) return;
+    try {
+      await _api.put(
+        _entryUrl(entry),
+        data: {
+          'value': value.text.trim(),
+          if (entry.scope == 'projects') 'notes': notes.text.trim(),
+        },
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存失败：${friendlyNetError(e)}')),
+      );
+    } finally {
+      value.dispose();
+      notes.dispose();
+    }
+  }
+
+  Future<void> _delete(_MemoryEntry entry) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除长期记忆？'),
+        content: Text('将删除“${entry.title}”。此操作不会删除聊天记录。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _api.delete(_entryUrl(entry));
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('删除失败：${friendlyNetError(e)}')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(_text, style: const TextStyle(fontSize: 13)),
-          TextButton(onPressed: _reload, child: const Text('重新加载')),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _scope,
+                  decoration: const InputDecoration(
+                    labelText: '记忆分类',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: _scopeLabels.entries
+                      .map(
+                        (item) => DropdownMenuItem(
+                          value: item.key,
+                          child: Text(item.value),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null || value == _scope) return;
+                    _scope = value;
+                    _load();
+                  },
+                ),
+              ),
+              IconButton(
+                tooltip: '重新加载',
+                onPressed: _loading ? null : _load,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_loading)
+            const Center(child: CircularProgressIndicator())
+          else if (_error.isNotEmpty)
+            Text(_error,
+                style: TextStyle(color: Theme.of(context).colorScheme.error))
+          else if (_entries.isEmpty)
+            const Text('（空）')
+          else
+            ..._entries.map(
+              (entry) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  title: Text(entry.title),
+                  subtitle: Text(
+                    [entry.value, if (entry.notes.isNotEmpty) entry.notes]
+                        .join('\n'),
+                    maxLines: 5,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Wrap(
+                    spacing: 0,
+                    children: [
+                      IconButton(
+                        tooltip: '修改',
+                        onPressed: () => _edit(entry),
+                        icon: const Icon(Icons.edit_outlined),
+                      ),
+                      IconButton(
+                        tooltip: '删除',
+                        onPressed: () => _delete(entry),
+                        icon: const Icon(Icons.delete_outline),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       );
+}
+
+class _MemoryEntry {
+  const _MemoryEntry({
+    required this.scope,
+    required this.key,
+    required this.title,
+    required this.value,
+    required this.notes,
+  });
+
+  final String scope;
+  final String key;
+  final String title;
+  final String value;
+  final String notes;
+
+  factory _MemoryEntry.fromJson(String scope, Map<dynamic, dynamic> json) {
+    if (scope == 'projects') {
+      final name = json['name'] as String? ?? '';
+      return _MemoryEntry(
+        scope: scope,
+        key: name,
+        title: name,
+        value: json['status'] as String? ?? '',
+        notes: json['notes'] as String? ?? '',
+      );
+    }
+    if (scope == 'knowledge') {
+      final id = '${json['id'] ?? ''}';
+      return _MemoryEntry(
+        scope: scope,
+        key: id,
+        title: '知识 #$id',
+        value: json['content'] as String? ?? '',
+        notes: '',
+      );
+    }
+    final key = json['key'] as String? ?? '';
+    return _MemoryEntry(
+      scope: scope,
+      key: key,
+      title: key,
+      value: json['value'] as String? ?? '',
+      notes: '',
+    );
+  }
 }

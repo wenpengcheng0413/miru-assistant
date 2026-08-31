@@ -30,6 +30,23 @@ def test_memory_endpoints(app_config):
         assert r.json()["entries"]
         r = client.delete("/api/memory/profile/称呼", headers=headers)
         assert r.json()["removed"] is True
+        client.put(
+            "/api/memory/knowledge/new",
+            json={"value": "旧知识"},
+            headers=headers,
+        )
+        knowledge = client.get("/api/memory?scope=knowledge", headers=headers).json()["entries"]
+        knowledge_id = knowledge[0]["id"]
+        r = client.put(
+            f"/api/memory/knowledge/{knowledge_id}",
+            json={"value": "修改后的知识"},
+            headers=headers,
+        )
+        assert r.status_code == 200
+        knowledge = client.get("/api/memory?scope=knowledge", headers=headers).json()["entries"]
+        assert knowledge[0]["content"] == "修改后的知识"
+        r = client.delete(f"/api/memory/knowledge/{knowledge_id}", headers=headers)
+        assert r.json()["removed"] is True
 
 
 def test_persona_and_budget_endpoints(app_config):

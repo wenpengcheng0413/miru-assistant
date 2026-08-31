@@ -23,6 +23,7 @@ token_path: "$($tokenPath.Replace('\', '\\'))"
 journal_path: "$($journalPath.Replace('\', '\\'))"
 capabilities:
   - home_node_ping
+  - wechat_conversation_messages
   - wechat_search_messages
 wechat_data_root: ""
 wechat_max_days: 90

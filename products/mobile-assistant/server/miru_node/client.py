@@ -136,7 +136,7 @@ class HomeNodeClient:
                     "node_time": datetime.now(timezone.utc).isoformat(),
                 },
             }
-        if tool == "wechat_search_messages":
+        if tool in {"wechat_search_messages", "wechat_conversation_messages"}:
             if not isinstance(args, dict):
                 return self._failure("invalid_tool_arguments", "微信搜索参数无效", False)
             from .wechat_adapter import WeChatAdapterError, WeChatNodeAdapter
@@ -147,13 +147,18 @@ class HomeNodeClient:
                 max_results=self.config.wechat_max_results,
             )
             try:
-                data = await asyncio.to_thread(adapter.search_messages, **args)
+                method = (
+                    adapter.search_messages
+                    if tool == "wechat_search_messages"
+                    else adapter.conversation_messages
+                )
+                data = await asyncio.to_thread(method, **args)
             except WeChatAdapterError as exc:
                 return self._failure(exc.error_code, exc.message, exc.retryable)
             except (TypeError, ValueError):
-                return self._failure("invalid_tool_arguments", "微信搜索参数无效", False)
+                return self._failure("invalid_tool_arguments", "微信读取参数无效", False)
             except Exception:
-                return self._failure("wechat_search_failed", "微信消息搜索失败", False)
+                return self._failure("wechat_read_failed", "微信消息读取失败", False)
             return {"ok": True, "data": data}
         return self._failure("node_capability_unavailable", "节点能力未启用", False)
 

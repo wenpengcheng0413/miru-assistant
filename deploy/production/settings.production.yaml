@@ -46,6 +46,7 @@ tools:
     - api_cost_report
     - api_budget_set
     - home_node_ping
+    - wechat_conversation_messages
     - wechat_search_messages
 
 db:
@@ -69,6 +70,7 @@ home_node:
   token: "${MIRU_HOME_NODE_TOKEN}"
   allowed_capabilities:
     - home_node_ping
+    - wechat_conversation_messages
     - wechat_search_messages
   heartbeat_interval_s: 20
   stale_after_s: 30

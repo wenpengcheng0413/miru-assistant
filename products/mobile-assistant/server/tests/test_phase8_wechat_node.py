@@ -15,7 +15,10 @@ from miru_server.node_registry import HomeNodeRegistry
 from miru_server.node_rpc import HomeNodeRpc
 from miru_server.main import create_app
 from miru_server.tools.base import ToolContext
-from miru_server.tools.builtin.wechat_node import WechatSearchMessagesNodeTool
+from miru_server.tools.builtin.wechat_node import (
+    WechatConversationMessagesNodeTool,
+    WechatSearchMessagesNodeTool,
+)
 from miru_server.tools.registry import ToolRegistry
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -44,26 +47,65 @@ class _FakeReader:
         ]
 
     def find_direct_session_tables(self, username: str):
-        assert username == "wxid_private_value"
-        return [("Msg_private_hash", "message/message_0.db", 3)]
+        if username == "wxid_private_value":
+            return [("Msg_private_hash", "message/message_0.db", 3)]
+        assert username == "group@chatroom"
+        return [("Msg_group_hash", "message/message_1.db", 3)]
 
     def read_messages_since(self, table: str, shard: str, since: int):
+        assert since > 0
+        if table == "Msg_group_hash":
+            assert shard == "message/message_1.db"
+            return [
+                SimpleNamespace(
+                    timestamp=1_800_000_004,
+                    server_id=4,
+                    sender_username="member-private-wxid",
+                    sender="Group Member",
+                    msg_type=1,
+                    content="group alpha",
+                ),
+                SimpleNamespace(
+                    timestamp=1_800_000_005,
+                    server_id=5,
+                    sender_username="unresolved-private-wxid",
+                    sender="wxid_must_not_leak",
+                    msg_type=3,
+                    content="[图片]",
+                ),
+                SimpleNamespace(
+                    timestamp=1_800_000_006,
+                    server_id=6,
+                    sender_username="self-secret-wxid",
+                    sender="我",
+                    msg_type=34,
+                    content="[语音] (时长 3s)",
+                ),
+            ]
         assert table == "Msg_private_hash"
         assert shard == "message/message_0.db"
-        assert since > 0
         return [
             SimpleNamespace(
                 timestamp=1_800_000_001,
+                server_id=1,
+                msg_type=1,
+                sender="Alice",
                 sender_username="wxid_private_value",
                 content="project keyword alpha",
             ),
             SimpleNamespace(
                 timestamp=1_800_000_002,
+                server_id=2,
+                msg_type=3,
+                sender="wxid_self_must_not_leak",
                 sender_username="self-secret-wxid",
                 content="<?xml version='1.0'?><msg><img aeskey='must-not-leak'/></msg>",
             ),
             SimpleNamespace(
                 timestamp=1_800_000_003,
+                server_id=3,
+                msg_type=1,
+                sender="wxid_self_must_not_leak",
                 sender_username="self-secret-wxid",
                 content="keyword " + "x" * 600,
             ),
@@ -99,10 +141,7 @@ def test_wechat_adapter_is_exact_bounded_and_value_scoped():
     assert "aeskey" not in encoded
 
 
-@pytest.mark.parametrize(
-    ("contact", "error_code"),
-    [("missing", "contact_not_found"), ("Test Group", "contact_scope_denied")],
-)
+@pytest.mark.parametrize(("contact", "error_code"), [("missing", "contact_not_found")])
 def test_wechat_adapter_rejects_unknown_and_group_scope(contact, error_code):
     adapter = WeChatNodeAdapter(reader_factory=_FakeReader)
     with pytest.raises(WeChatAdapterError) as exc:
@@ -111,13 +150,55 @@ def test_wechat_adapter_rejects_unknown_and_group_scope(contact, error_code):
     assert "wxid" not in exc.value.message
 
 
+def test_wechat_conversation_pages_group_without_identifiers_or_paths():
+    adapter = WeChatNodeAdapter(reader_factory=_FakeReader, max_results=2)
+    first = adapter.conversation_messages(contact="Test Group", days=30, limit=99)
+    assert first["conversation_type"] == "group"
+    assert len(first["messages"]) == 2
+    assert first["messages"][0]["sender"] == "group_member"
+    assert first["messages"][0]["message_type"] == "image"
+    assert first["messages"][1]["sender"] == "self"
+    assert first["messages"][1]["message_type"] == "voice"
+    assert first["has_more"] is True
+    assert first["next_cursor"]
+
+    second = adapter.conversation_messages(
+        contact="Test Group",
+        days=30,
+        limit=2,
+        cursor=first["next_cursor"],
+    )
+    assert [m["sender"] for m in second["messages"]] == ["Group Member"]
+    assert second["has_more"] is False
+    assert second["next_cursor"] == ""
+    encoded = str(first) + str(second)
+    assert "wxid_" not in encoded
+    assert "message_1.db" not in encoded
+
+
+def test_wechat_conversation_rejects_cursor_from_another_scope():
+    adapter = WeChatNodeAdapter(reader_factory=_FakeReader, max_results=2)
+    first = adapter.conversation_messages(contact="Test Group", days=30, limit=1)
+    with pytest.raises(WeChatAdapterError) as exc:
+        adapter.conversation_messages(
+            contact="Alice",
+            days=30,
+            cursor=first["next_cursor"],
+        )
+    assert exc.value.error_code == "invalid_cursor"
+
+
 @pytest.mark.asyncio
 async def test_node_client_executes_only_allowlisted_wechat_search(tmp_path, monkeypatch):
     config = NodeClientConfig(
         cloud_url="wss://example.test/ws/node",
         token_path=str(tmp_path / "token"),
         journal_path=str(tmp_path / "journal.json"),
-        capabilities=["home_node_ping", "wechat_search_messages"],
+        capabilities=[
+            "home_node_ping",
+            "wechat_conversation_messages",
+            "wechat_search_messages",
+        ],
     )
     client = HomeNodeClient(config)
     monkeypatch.setattr(
@@ -131,6 +212,17 @@ async def test_node_client_executes_only_allowlisted_wechat_search(tmp_path, mon
     })
     assert result["ok"] is True
     assert result["data"]["total_hits"] == 1
+    monkeypatch.setattr(
+        WeChatNodeAdapter,
+        "conversation_messages",
+        lambda self, **kwargs: {"messages": [], "has_more": False, **kwargs},
+    )
+    page = await client._run_job({
+        "tool": "wechat_conversation_messages",
+        "args": {"contact": "Test Group", "days": 7, "limit": 3, "cursor": ""},
+    })
+    assert page["ok"] is True
+    assert page["data"]["contact"] == "Test Group"
     denied = await client._run_job({"tool": "wechat_recent_messages", "args": {}})
     assert denied["error_code"] == "node_capability_unavailable"
 
@@ -175,6 +267,42 @@ async def test_cloud_proxy_routes_bounded_wechat_job():
     assert result.data["total_hits"] == 1
 
 
+@pytest.mark.asyncio
+async def test_cloud_proxy_routes_conversation_page():
+    registry = HomeNodeRegistry(HomeNodeConfig(
+        enabled=True,
+        token="x" * 32,
+        allowed_capabilities=["wechat_conversation_messages"],
+    ))
+    connection_id = registry.register(
+        protocol_version=1,
+        capabilities=["wechat_conversation_messages"],
+    )
+    rpc = HomeNodeRpc(registry)
+    tool_registry = ToolRegistry(
+        [WechatConversationMessagesNodeTool],
+        enabled=["wechat_conversation_messages"],
+        profile="cloud",
+    )
+    tool_registry.bind_home_node(registry)
+
+    async def send(payload: dict) -> None:
+        assert payload["tool"] == "wechat_conversation_messages"
+        rpc.accept_result(connection_id, {
+            "job_id": payload["job_id"],
+            "result": {"ok": True, "data": {"messages": [], "has_more": False}},
+        })
+
+    await rpc.attach(connection_id, send)
+    services = SimpleNamespace(node_rpc=rpc)
+    result = await tool_registry.execute(
+        ToolContext(services=services, conversation_id="c", turn_id="page-turn"),
+        "wechat_conversation_messages",
+        {"contact": "Test Group", "days": 7, "limit": 2, "cursor": ""},
+    )
+    assert result.ok is True
+
+
 def test_phase8_production_allowlist_contains_only_read_capability():
     settings = (REPO_ROOT / "deploy/production/settings.production.yaml").read_text(
         encoding="utf-8"
@@ -184,7 +312,9 @@ def test_phase8_production_allowlist_contains_only_read_capability():
     ).read_text(encoding="utf-8")
     dockerfile = (REPO_ROOT / "deploy/Dockerfile.phase8-overlay").read_text(encoding="utf-8")
     assert settings.count("- wechat_search_messages") == 2
+    assert settings.count("- wechat_conversation_messages") == 2
     assert "  - wechat_search_messages" in installer
+    assert "  - wechat_conversation_messages" in installer
     assert "wechat_max_days: 90" in installer
     assert "wechat_max_results: 20" in installer
     for forbidden in ["wechat_recent_messages", "wechat_transcribe_voice", "wechat_image_analysis"]:

@@ -161,9 +161,12 @@ def build_registry(config: Any) -> ToolRegistry:
     ]
     profile = getattr(config, "profile", "development")
     if profile == "cloud":
-        from .builtin.wechat_node import WechatSearchMessagesNodeTool
+        from .builtin.wechat_node import (
+            WechatConversationMessagesNodeTool,
+            WechatSearchMessagesNodeTool,
+        )
 
-        tools.append(WechatSearchMessagesNodeTool)
+        tools.extend([WechatSearchMessagesNodeTool, WechatConversationMessagesNodeTool])
     else:
         from .builtin.wechat import (
             WechatChatStatsTool,

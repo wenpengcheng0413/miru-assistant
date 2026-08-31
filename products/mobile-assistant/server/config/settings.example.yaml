@@ -78,6 +78,7 @@ tools:
     # - wechat_recent_activity
     # - wechat_chat_stats
     # - wechat_search_messages
+    # - wechat_conversation_messages
     # - wechat_recent_messages
     # - wechat_transcribe_voice  # 本机解码并转写微信语音，首次可能加载 STT 模型
     # - wechat_group_list
@@ -114,6 +115,7 @@ home_node:
   allowed_capabilities:              # 固定白名单；禁止任意命令能力
     - home_node_ping
     - wechat_search_messages
+    - wechat_conversation_messages
   heartbeat_interval_s: 20
   stale_after_s: 30
   offline_after_s: 60

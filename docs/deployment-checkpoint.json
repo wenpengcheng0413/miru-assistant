@@ -15,7 +15,7 @@
     "phase9_voice_transcription_commit": "ad77988",
     "phase9_original_image_relay_commit": "8cfd6ca",
     "phase9_media_overlay_commit": "84d3722",
-    "push_state": "master pushed through 76dae93; guarded Tencent STT and Home Node fallback are active in production",
+    "push_state": "Tencent STT feature commit 76dae93 and production activation records are pushed to origin/master",
     "dirty_worktree_preserved": true
   },
   "production": {

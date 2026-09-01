@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 stt = ["sherpa-onnx>=1.10", "numpy"]
-tts-fallback = ["edge-tts>=6.1"]
+tts-fallback = ["edge-tts>=7.2.8,<8"]
 debug-voice = ["sounddevice>=0.4"]
 document = ["PyMuPDF>=1.24", "openpyxl>=3.1", "python-docx>=1.1", "python-pptx>=1.0"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]

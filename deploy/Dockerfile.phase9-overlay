@@ -1,6 +1,10 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
+USER root
+RUN python -m pip install --no-cache-dir edge-tts==7.2.8
+USER miru
+
 COPY --chown=miru:miru server/miru_server/config.py /app/miru_server/config.py
 COPY --chown=miru:miru server/miru_server/services.py /app/miru_server/services.py
 COPY --chown=miru:miru server/miru_server/main.py /app/miru_server/main.py
@@ -13,5 +17,6 @@ COPY --chown=miru:miru server/miru_server/node_rpc.py /app/miru_server/node_rpc.
 COPY --chown=miru:miru server/miru_server/stt/base.py /app/miru_server/stt/base.py
 COPY --chown=miru:miru server/miru_server/stt/qwen_stt.py /app/miru_server/stt/qwen_stt.py
 COPY --chown=miru:miru server/miru_server/stt/tencent_stt.py /app/miru_server/stt/tencent_stt.py
+COPY --chown=miru:miru server/miru_server/tts/edge_tts.py /app/miru_server/tts/edge_tts.py
 COPY --chown=miru:miru server/miru_server/tools/registry.py /app/miru_server/tools/registry.py
 COPY --chown=miru:miru server/miru_server/tools/builtin/wechat_node.py /app/miru_server/tools/builtin/wechat_node.py

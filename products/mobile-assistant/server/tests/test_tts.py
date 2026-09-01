@@ -1,8 +1,13 @@
 """TTS 句队列与 MiniMax SSE 解析测试（FakeProvider，不联网）。"""
 import asyncio
+from types import SimpleNamespace
+
+import pytest
 
 from miru_server.config import TTSConfig
-from miru_server.tts.base import VoiceConfig
+from miru_server.tts import edge_tts as edge_module
+from miru_server.tts.base import TTSUnavailable, VoiceConfig
+from miru_server.tts.edge_tts import EdgeTTS
 from miru_server.tts.minimax_tts import MiniMaxTTS
 from miru_server.tts.queue import TTSQueue
 
@@ -85,6 +90,84 @@ def test_minimax_sse_hex_parsing():
     tts = MiniMaxTTS(cfg)
     chunks = run(_collect(tts._iter_audio(FakeResp())))
     assert b"".join(chunks) == b"helloworld"
+
+
+def test_edge_tts_fails_closed_when_dependency_is_missing(monkeypatch):
+    monkeypatch.setattr(edge_module, "EDGE_AVAILABLE", False)
+    with pytest.raises(TTSUnavailable, match="依赖未安装"):
+        EdgeTTS(TTSConfig(provider="edge"))
+
+
+def test_edge_tts_returns_bounded_audio_without_logging_text(monkeypatch):
+    class FakeCommunicate:
+        def __init__(self, text, voice):
+            assert text == "这是敏感测试文本。"
+            assert voice == "zh-CN-XiaoxiaoNeural"
+
+        async def stream(self):
+            yield {"type": "WordBoundary", "data": b"ignored"}
+            yield {"type": "audio", "data": b"mp3-audio"}
+
+    monkeypatch.setattr(edge_module, "EDGE_AVAILABLE", True)
+    monkeypatch.setattr(
+        edge_module,
+        "edge_tts",
+        SimpleNamespace(Communicate=FakeCommunicate),
+    )
+    provider = EdgeTTS(TTSConfig(provider="edge"))
+    assert run(provider.synthesize("这是敏感测试文本。", VoiceConfig())) == b"mp3-audio"
+
+
+def test_edge_tts_rejects_empty_audio_and_redacts_provider_error(monkeypatch):
+    class EmptyCommunicate:
+        def __init__(self, text, voice):
+            pass
+
+        async def stream(self):
+            if False:
+                yield {}
+
+    class FailingCommunicate:
+        def __init__(self, text, voice):
+            pass
+
+        async def stream(self):
+            raise RuntimeError("SENSITIVE_REMOTE_RESPONSE")
+            yield {}
+
+    monkeypatch.setattr(edge_module, "EDGE_AVAILABLE", True)
+    monkeypatch.setattr(
+        edge_module,
+        "edge_tts",
+        SimpleNamespace(Communicate=EmptyCommunicate),
+    )
+    provider = EdgeTTS(TTSConfig(provider="edge"))
+    with pytest.raises(TTSUnavailable, match="返回空音频"):
+        run(provider.synthesize("你好", VoiceConfig()))
+
+    monkeypatch.setattr(
+        edge_module,
+        "edge_tts",
+        SimpleNamespace(Communicate=FailingCommunicate),
+    )
+    with pytest.raises(TTSUnavailable, match="暂时不可用") as exc:
+        run(provider.synthesize("不要泄露", VoiceConfig()))
+    assert "SENSITIVE_REMOTE_RESPONSE" not in str(exc.value)
+
+
+def test_production_manifest_activates_free_edge_tts():
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[4]
+    settings = (repo / "deploy/production/settings.production.yaml").read_text("utf-8")
+    requirements = (repo / "deploy/requirements-cloud.txt").read_text("utf-8")
+    overlay = (repo / "deploy/Dockerfile.phase9-overlay").read_text("utf-8")
+    assert "provider: edge" in settings
+    assert "voice: zh-CN-XiaoxiaoNeural" in settings
+    assert "timeout_s: 20" in settings
+    assert "edge-tts==7.2.8" in requirements
+    assert "edge-tts==7.2.8" in overlay
+    assert "miru_server/tts/edge_tts.py" in overlay
 
 
 async def _collect(gen):

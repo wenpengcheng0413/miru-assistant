@@ -103,6 +103,7 @@ class MiniMaxConfig(BaseModel):
 
 class EdgeTTSConfig(BaseModel):
     voice: str = "zh-CN-XiaoxiaoNeural"
+    timeout_s: int = Field(default=20, ge=5, le=60)
 
 
 class TTSConfig(BaseModel):

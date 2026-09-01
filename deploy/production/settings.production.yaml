@@ -32,7 +32,15 @@ stt:
     billing_guard: "${MIRU_TENCENT_ASR_BILLING_GUARD}"
 
 tts:
-  provider: none
+  # No API key or billing account. This is the Microsoft Edge online voice,
+  # so a provider outage degrades to text without blocking the conversation.
+  provider: edge
+  format: mp3
+  sample_rate: 24000
+  fallback_to_edge: false
+  edge:
+    voice: zh-CN-XiaoxiaoNeural
+    timeout_s: 20
 
 memory:
   auto_extract: true

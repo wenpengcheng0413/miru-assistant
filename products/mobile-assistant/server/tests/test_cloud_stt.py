@@ -209,14 +209,20 @@ def test_qwen_stt_redacts_provider_failure(monkeypatch, caplog):
     assert "SENSITIVE_PROVIDER_RESPONSE" not in caplog.text
 
 
-def test_production_manifest_does_not_activate_paid_stt_before_console_gate():
+def test_production_manifest_activates_guarded_tencent_stt_after_console_gate():
     repo = Path(__file__).resolve().parents[4]
     settings = (repo / "deploy/production/settings.production.yaml").read_text("utf-8")
     compose = (repo / "deploy/production/compose.production.yaml").read_text("utf-8")
     overlay = (repo / "deploy/Dockerfile.phase9-overlay").read_text("utf-8")
-    assert "engine: none" in settings
+    assert "engine: tencent" in settings
     assert "engine: qwen" not in settings
-    assert "stt_api_key" not in compose
+    assert '${MIRU_TENCENT_ASR_SECRET_ID}' in settings
+    assert '${MIRU_TENCENT_ASR_SECRET_KEY}' in settings
+    assert '${MIRU_TENCENT_ASR_BILLING_GUARD}' in settings
+    assert "/opt/miru/secrets/tencent_asr_secret_id" in compose
+    assert "/opt/miru/secrets/tencent_asr_secret_key" in compose
+    assert 'MIRU_TENCENT_ASR_BILLING_GUARD="postpay-disabled"' in compose
+    assert "AKID" not in compose
     assert "speech_to_text" in settings
     assert "miru_server/stt/tencent_stt.py" in overlay
     assert "miru_server/api/ws.py" in overlay

@@ -15,13 +15,21 @@ services:
         test -r /run/secrets/server_token
         test -r /run/secrets/deepseek_api_key
         test -r /run/secrets/home_node_token
+        test -r /run/secrets/tencent_asr_secret_id
+        test -r /run/secrets/tencent_asr_secret_key
         MIRU_SERVER_TOKEN="$$(cat /run/secrets/server_token)"
         MIRU_DEEPSEEK_API_KEY="$$(cat /run/secrets/deepseek_api_key)"
         MIRU_HOME_NODE_TOKEN="$$(cat /run/secrets/home_node_token)"
+        MIRU_TENCENT_ASR_SECRET_ID="$$(cat /run/secrets/tencent_asr_secret_id)"
+        MIRU_TENCENT_ASR_SECRET_KEY="$$(cat /run/secrets/tencent_asr_secret_key)"
+        MIRU_TENCENT_ASR_BILLING_GUARD="postpay-disabled"
         test -n "$$MIRU_SERVER_TOKEN"
         test -n "$$MIRU_DEEPSEEK_API_KEY"
         test -n "$$MIRU_HOME_NODE_TOKEN"
+        test -n "$$MIRU_TENCENT_ASR_SECRET_ID"
+        test -n "$$MIRU_TENCENT_ASR_SECRET_KEY"
         export MIRU_SERVER_TOKEN MIRU_DEEPSEEK_API_KEY MIRU_HOME_NODE_TOKEN
+        export MIRU_TENCENT_ASR_SECRET_ID MIRU_TENCENT_ASR_SECRET_KEY MIRU_TENCENT_ASR_BILLING_GUARD
         exec python -m miru_server --profile cloud --host 0.0.0.0 --port 8765
     volumes:
       - type: bind
@@ -38,6 +46,14 @@ services:
       - type: bind
         source: /opt/miru/secrets/home_node_token
         target: /run/secrets/home_node_token
+        read_only: true
+      - type: bind
+        source: /opt/miru/secrets/tencent_asr_secret_id
+        target: /run/secrets/tencent_asr_secret_id
+        read_only: true
+      - type: bind
+        source: /opt/miru/secrets/tencent_asr_secret_key
+        target: /run/secrets/tencent_asr_secret_key
         read_only: true
       - type: bind
         source: ./settings.production.yaml

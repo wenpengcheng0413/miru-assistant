@@ -3,6 +3,7 @@
 # ============================================================
 
 # Product-local secrets and private configuration
+.secrets/
 products/daily-report/config/settings.yaml
 products/daily-report/config/contacts.yaml
 products/daily-report/config/database_keys.yaml

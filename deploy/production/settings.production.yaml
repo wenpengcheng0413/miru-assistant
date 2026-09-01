@@ -20,18 +20,16 @@ llm:
   max_tool_rounds: 6
 
 stt:
-  # Credentials are intentionally not activated until Tencent ASR postpay is
-  # confirmed disabled. Home Node SenseVoice remains the zero-cost fallback.
-  engine: none
-  # Activation template after the console and CAM gates are complete:
-  # engine: tencent
-  # tencent:
-  #   endpoint: https://asr.tencentcloudapi.com
-  #   secret_id: "${MIRU_TENCENT_ASR_SECRET_ID}"
-  #   secret_key: "${MIRU_TENCENT_ASR_SECRET_KEY}"
-  #   engine_model: 16k_zh-PY
-  #   timeout_s: 30
-  #   billing_guard: "${MIRU_TENCENT_ASR_BILLING_GUARD}"
+  # Tencent postpay is disabled in the console. The explicit guard below is a
+  # second operational gate; Home Node SenseVoice remains the zero-cost fallback.
+  engine: tencent
+  tencent:
+    endpoint: https://asr.tencentcloudapi.com
+    secret_id: "${MIRU_TENCENT_ASR_SECRET_ID}"
+    secret_key: "${MIRU_TENCENT_ASR_SECRET_KEY}"
+    engine_model: 16k_zh-PY
+    timeout_s: 30
+    billing_guard: "${MIRU_TENCENT_ASR_BILLING_GUARD}"
 
 tts:
   provider: none

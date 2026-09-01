@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-01T00:00:00+08:00",
+  "updated_at": "2026-09-02T02:21:58+08:00",
   "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
   "git": {
     "branch": "master",
@@ -15,13 +15,13 @@
     "phase9_voice_transcription_commit": "ad77988",
     "phase9_original_image_relay_commit": "8cfd6ca",
     "phase9_media_overlay_commit": "84d3722",
-    "push_state": "Free-first Tencent STT plus Home Node fallback is being prepared locally; origin push and production activation remain pending",
+    "push_state": "master pushed through 76dae93; guarded Tencent STT and Home Node fallback are active in production",
     "dirty_worktree_preserved": true
   },
   "production": {
     "state": "healthy",
-    "active_release": "p9m1-20260831-1238-84d3722-61a2bf90",
-    "rollback_release": "p8v1-20260831-1219-ad77988-5d3a918c",
+    "active_release": "p9stt-20260901-1854-76dae93",
+    "rollback_release": "p10-20260831-ddacac8",
     "last_fully_accepted_release": "p8r1-20260831-0916-fca4b1a-b19a035e",
     "access": "tailscale-private-https-wss",
     "funnel": "off",
@@ -133,11 +133,16 @@
         "Qwen Cloud STT provider retained as an optional disabled fallback",
         "Tencent SentenceRecognition provider with TC3 signing and explicit postpay-disabled guard implemented locally",
         "Home Node SenseVoice microphone fallback implemented over bounded authenticated WSS RPC",
-        "server regression: 132 passed, 1 sandbox-only DPAPI skip"
+        "server regression: 132 passed, 1 sandbox-only DPAPI skip",
+        "Tencent ASR service activated with postpay disabled",
+        "least-privilege CAM subuser and SentenceRecognition-only policy provisioned with old credential rotated out",
+        "production Tencent credentials installed as read-only 0400 secrets outside the repository",
+        "guarded Tencent STT production release activated with database backup and rollback release retained",
+        "real Tencent SentenceRecognition provider smoke passed without retaining transcript evidence",
+        "Home Node speech_to_text capability online and real SenseVoice fallback smoke passed",
+        "production runtime secret, transcript, health, database, and Tailnet HTTPS checks passed"
       ],
       "pending_gates": [
-        "confirm Tencent ASR postpay is disabled and provision least-privilege CAM credentials",
-        "deploy and verify free-first Cloud STT without exposing provider response, credentials, or audio",
         "physical iPhone microphone STT acceptance with Home Node offline",
         "configure and accept Cloud TTS for the complete voice loop"
       ]
@@ -156,8 +161,8 @@
     "artifact_version": "0.3.0+3",
     "artifact_sha256": "8805CCBEE0FDDDC52B35F1DE4556926EA5B4A36A8FF8E5EEC230105CB72893F0"
   },
-  "human_gate": "Authorize Tencent Cloud console access when ready so ASR postpay can be confirmed disabled before least-privilege credentials are created.",
-  "next_action": "finish local verification, then configure Tencent ASR with postpay disabled, deploy the Cloud and Home Node updates, and run physical iPhone voice acceptance before Phase 10 recovery work",
+  "human_gate": "Run physical iPhone microphone acceptance with Home Node offline; no further cloud-console authorization is currently required.",
+  "next_action": "complete physical iPhone microphone STT acceptance, then choose and validate a free-first Cloud TTS path before Phase 10 recovery work",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,
@@ -210,15 +215,21 @@
   },
   "phase9": {
     "release_archive_sha256": "bc6dad8386c7cd5fed254d401179cb7c3fa6a836368df3758f8e4eff65246945",
-    "image_id": "sha256:3798ff46c78464543d937ceef517ae98125aaa843e71feaf198ee5babba1cd04",
-    "pre_activation_database_sha256": "b88e316a848e724355779cf62fbdc603de74abb857118cfa45768fafb8678b66",
+    "image_id": "sha256:5f2a86ea65b11d3c659443c188e96036abf62130dc67532f49782371ab2564fe",
+    "pre_activation_database_sha256": "a75abc76634f0e8783789f8620dd52cbaa1ed595c8dad08a0f6066473b81eb7e",
     "home_node_state": "online",
-    "accepted_capabilities": ["home_node_ping", "wechat_conversation_messages", "wechat_original_images", "wechat_search_messages", "wechat_transcribe_voice"],
+    "accepted_capabilities": ["home_node_ping", "speech_to_text", "wechat_conversation_messages", "wechat_original_images", "wechat_search_messages", "wechat_transcribe_voice"],
     "automated_backend_verification": "passed",
     "flutter_analyze": "passed",
-    "codemagic_build": "pending_push_authorization",
+    "codemagic_build": "not_required_for_server_and_home_node_only_activation",
     "physical_app_acceptance": "original_image_user_reported_pass; cloud_microphone_stt_pending",
-    "cloud_stt_implementation": "tencent_free_first_with_home_node_fallback_local_worktree_ready; console_guard_credentials_and_deployment_pending"
+    "cloud_stt_implementation": "tencent_sentence_recognition_active_with_postpay_disabled_guard_and_home_node_sensevoice_fallback",
+    "production_release": "p9stt-20260901-1854-76dae93",
+    "rollback_release": "p10-20260831-ddacac8",
+    "cloud_stt_status": "tencent-sentence-recognition available=true",
+    "real_provider_smoke": "passed",
+    "home_node_fallback_smoke": "passed",
+    "sensitive_runtime_scan": "passed"
   },
   "evidence_root": "docs/evidence/phase9/p9m1-20260831-1238-84d3722-61a2bf90"
 }

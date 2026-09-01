@@ -1,28 +1,28 @@
-# Phase 9 免费优先 STT 实施记录
+# Phase 9 免费优先 STT 实施与生产激活记录
 
-日期：2026-09-01
-状态：腾讯云与家庭节点代码、配置门和离线测试已就绪；云账号凭据、部署和真机验收待完成。
+日期：2026-09-02
+
+状态：腾讯云 STT、家庭节点回退、生产部署和自动化验收已完成；iPhone 麦克风真机验收与 Cloud TTS 待完成。
 
 ## 当前结论
 
-生产环境暂时保持 `stt.engine: none`，因此在没有完成腾讯云控制台安全设置前，不会发送音频、消耗额度或产生费用。此前准备的阿里云百炼 Qwen 适配仍保留为可选备用，但已移出生产默认值和启动必需密钥。
+生产环境已启用 `stt.engine: tencent`。腾讯云“一句话识别”是 Cloud 主 Provider，可在电脑关闭时工作；调用失败、不可用或免费额度耗尽时，同一次语音会自动尝试在线的 Home Node SenseVoice。两者均不可用时只返回稳定的 `STTUnavailable`，文字聊天、历史和记忆不受影响。
 
-免费优先链路为：
-
-1. 腾讯云“一句话识别”作为 Cloud 主 Provider，可在电脑关闭时工作。
-2. 主 Provider 未配置、请求失败或免费额度耗尽时，同一次语音自动尝试在线的 Home Node SenseVoice。
-3. 两者均不可用时只返回稳定的 `STTUnavailable`；文字聊天、历史和记忆不受影响。
+生产版本为 `p9stt-20260901-1854-76dae93`，Cloud 状态已报告 `tencent-sentence-recognition available=true`，Home Node 在线并声明 `speech_to_text` 能力。此前准备的阿里云百炼 Qwen 适配仍作为非默认备用保留，不是生产启动依赖。
 
 ## 安全与费用控制
 
-- 腾讯 Provider 只有在 SecretId、SecretKey 和 `billing_guard: postpay-disabled` 三者齐全时才会实例化。
-- `billing_guard` 不是腾讯云计费开关，而是 Miru 的第二道操作门。必须先在腾讯云控制台确认关闭后付费，再设置该值。
-- 当前生产 Compose 不挂载任何 STT 密钥，也不要求 STT 密钥才能启动。
-- Provider 请求使用 TC3-HMAC-SHA256；日志只保留异常类型或腾讯错误码，不记录密钥、响应消息、音频或识别文本。
-- 手机 PCM16 音频只在内存中 Base64 编码。腾讯链路最大 60 秒；家庭节点回退也固定为 16kHz、60 秒和 1,920,000 原始字节。
-- Home Node 回退通过现有独立 Node Token 认证的 WSS 连接发送，不写临时音频文件，不开放任意命令执行。
+- 腾讯云语音识别服务已开通，后付费保持关闭；未点击“开通后付费”。
+- CAM 子用户为 `miru-asr-prod`，仅允许编程访问，并只绑定自定义策略 `MiruASRSentenceRecognitionOnly`。
+- 策略只允许 `asr:SentenceRecognition`，不包含付费模式、财务、控制台管理或自助管理密钥权限。
+- 自动生成的旧凭据已停用并永久删除；新凭据未写入仓库、聊天记录或日志。
+- 生产 Secret 位于 `/opt/miru/secrets/`，属主 `10001:10001`、权限 `0400`，以只读文件挂载进容器。
+- Provider 只有在 SecretId、SecretKey 和 `billing_guard: postpay-disabled` 三者齐全时才会实例化。该 guard 是 Miru 的第二道操作门，不替代腾讯云计费设置。
+- 日志只保留异常类型或腾讯错误码，不记录密钥、响应消息、音频或识别文本；运行时 Secret 与转写文本扫描未发现泄露。
+- 手机 PCM16 音频只在内存中 Base64 编码。腾讯链路最大 60 秒；家庭节点回退固定为 16kHz、60 秒和 1,920,000 原始字节。
+- Home Node 回退通过独立 Node Token 认证的 WSS 连接发送，不写临时音频文件，不开放任意命令执行。
 
-## 腾讯云接口选择
+## 腾讯云接口
 
 - 接口：`SentenceRecognition`
 - 域名：`https://asr.tencentcloudapi.com`
@@ -32,28 +32,31 @@
 
 官方限制和参数见[一句话识别 API](https://cloud.tencent.com/document/api/1093/35646)，免费额度与后付费开关见[语音识别计费说明](https://cloud.tencent.com/document/product/1093/35686)。
 
-## 启用门
+## 已完成验证
 
-后续需要用户授权的控制台步骤：
+- 后端完整回归：132 passed，1 skipped（仅沙箱 DPAPI）。
+- Docker Compose 生产配置静态校验通过。
+- 生产 API 容器健康，数据库 `quick_check=ok`。
+- 真实腾讯 `SentenceRecognition` 短音频调用成功，识别结果长度为 6 个字符；证据不保存识别文本。
+- 同一短音频经 Home Node SenseVoice 识别成功，确认免费本地回退目标可用。
+- Home Node 计划任务处于 Running，Cloud 可见 `speech_to_text=true`。
+- Tailnet HTTPS `/healthz` 返回正常。
+- 外部 `/api/debug/stt` 继续由生产 Caddy 返回 404，调试接口未暴露。
+- 部署临时凭据副本、远端测试音频和临时归档已删除；本地仅保留 ACL 保护的原始密钥 CSV。
 
-1. 登录腾讯云并确认语音识别服务的后付费处于关闭状态。
-2. 使用 CAM 子用户或角色创建仅用于 ASR 的最小权限凭据，禁止使用主账号永久密钥。
-3. 将 SecretId、SecretKey 作为服务器只读 Secret 写入，不写入仓库、App 或日志。
-4. 只有完成第 1 步后，才设置 `MIRU_TENCENT_ASR_BILLING_GUARD=postpay-disabled`。
-5. 部署后先用短测试 WAV 验证，再进行 iPhone、Home Node 离线和额度/Provider 失败回退验收。
+## 激活处置记录
 
-## 已完成的离线验证范围
+激活过程触发了保护性回滚，但未造成数据损坏或密钥泄露：
 
-- 腾讯配置门、Cloud profile、PCM 请求、TC3 Authorization 头和响应解析。
-- Provider 错误消息与密钥脱敏。
-- Qwen 不再是生产默认值，生产启动不再依赖百炼密钥。
-- Cloud Provider 不可用时自动回退 Home Node SenseVoice。
-- Home Node 能力白名单、音频尺寸边界和动态 `/api/status`。
+1. 首次候选启动前尚未安装 Secret，检查失败并自动回滚，未切换当前版本或修改数据库。
+2. 初版部署脚本使用了错误的 Compose project directory，使配置路径被错误解析；旧版本一度不健康。随后用正确的 `/opt/miru/app/current/config` 恢复旧版本，并修正所有 Compose 调用。
+3. 第二次候选已经健康，但验收脚本读取了过期的顶层 `stt_engine` 字段，因而自动回滚；校验已改为读取 `capabilities.stt`。
+4. 修正后的第三次激活成功。当前版本、容器健康、数据库完整性、Cloud STT、Home Node 回退和真实 Provider 调用均已再次验证。
+
+回滚版本 `p10-20260831-ddacac8` 与激活前数据库备份仍保留；备份 SHA-256 为 `a75abc76634f0e8783789f8620dd52cbaa1ed595c8dad08a0f6066473b81eb7e`。
 
 ## 后续顺序
 
-1. 完成腾讯云控制台的零账单保护与最小权限凭据。
-2. 部署 Cloud 与 Home Node 更新，验证主链路和自动回退。
-3. 完成 iPhone 麦克风 STT 真机验收。
-4. 评估免费 TTS 路线，完成电脑关闭时的语音问答闭环。
-5. 关闭 Phase 8/9 其余物理验收项，再进入 Phase 10 备份恢复与监控。
+1. 在 iPhone 上完成麦克风 STT 真机验收，重点验证 Home Node 离线时仍可由腾讯 Cloud 识别。
+2. 评估并配置免费优先的 Cloud TTS，完成电脑关闭时的语音问答闭环。
+3. 关闭 Phase 8/9 其余物理验收项，再进入 Phase 10 备份恢复与监控。

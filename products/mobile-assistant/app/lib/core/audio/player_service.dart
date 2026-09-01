@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 
 /// 句级音频播放队列：
 /// - 后端每句先发 sentence 事件、紧跟一个或多个音频二进制帧
@@ -22,7 +24,7 @@ class PlayerService {
   PlayerService() {
     _player.onPlayerComplete.listen((_) {
       _playing = false;
-      _pump();
+      unawaited(_pump());
     });
   }
 
@@ -33,14 +35,22 @@ class PlayerService {
     final bytes = _current.takeBytes();
     if (bytes.isEmpty) return;
     _queue.add(bytes);
-    _pump();
+    unawaited(_pump());
   }
 
   Future<void> _pump() async {
     if (_playing || _queue.isEmpty) return;
     _playing = true;
     final bytes = _queue.removeAt(0);
-    await _player.play(BytesSource(bytes), ctx: _ttsContext);
+    try {
+      await _player.play(BytesSource(bytes), ctx: _ttsContext);
+    } catch (error) {
+      // iOS/Darwin 播放器若拒绝短 MP3，不能让队列永久卡在 _playing=true。
+      // 仅记录异常类型，音频内容与服务端文本都不进入设备日志。
+      debugPrint('TTS playback failed: ${error.runtimeType}');
+      _playing = false;
+      unawaited(_pump());
+    }
   }
 
   /// 打断：清空队列与缓冲，立即停止出声

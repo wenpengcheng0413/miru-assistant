@@ -1,7 +1,7 @@
 name: miru_app
 description: Miru 语音 AI 助手客户端（iPhone 语音入口）
 publish_to: 'none'
-version: 0.3.0+3
+version: 0.3.1+4
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -11,7 +11,7 @@ dependencies:
     sdk: flutter
   web_socket_channel: ^3.0.1
   record: 6.2.1
-  audioplayers: ^6.1.0
+  audioplayers: 6.7.1
   dio: ^5.4.3
   shared_preferences: ^2.3.0
   flutter_secure_storage: ^9.0.0
@@ -30,6 +30,11 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+
+# audioplayers_darwin 6.4.0+ 的异步 Swift 播放实现在 iOS 短 MP3 上可能
+# 挂起首个 play()；6.3.0 位于该回归之前。真机验证通过前保持精确固定。
+dependency_overrides:
+  audioplayers_darwin: 6.3.0
 
 flutter:
   uses-material-design: true

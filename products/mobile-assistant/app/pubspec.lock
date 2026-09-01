@@ -34,13 +34,13 @@ packages:
     source: hosted
     version: "5.2.1"
   audioplayers_darwin:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
       name: audioplayers_darwin
-      sha256: c994b3bb3a921e4904ac40e013fbc94488e824fd7c1de6326f549943b0b44a91
+      sha256: "0811d6924904ca13f9ef90d19081e4a87f7297ddc19fc3d31f60af1aaafee333"
       url: "https://pub.flutter-io.cn"
     source: hosted
-    version: "6.4.0"
+    version: "6.3.0"
   audioplayers_linux:
     dependency: transitive
     description:

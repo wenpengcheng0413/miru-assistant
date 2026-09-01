@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-02T02:21:58+08:00",
+  "updated_at": "2026-09-02T02:56:51+08:00",
   "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
   "git": {
     "branch": "master",
@@ -15,13 +15,13 @@
     "phase9_voice_transcription_commit": "ad77988",
     "phase9_original_image_relay_commit": "8cfd6ca",
     "phase9_media_overlay_commit": "84d3722",
-    "push_state": "Tencent STT feature commit 76dae93 and production activation records are pushed to origin/master",
+    "push_state": "Tencent STT commit 76dae93 and free Cloud TTS commit 51d51f0 are pushed to origin/master",
     "dirty_worktree_preserved": true
   },
   "production": {
     "state": "healthy",
-    "active_release": "p9stt-20260901-1854-76dae93",
-    "rollback_release": "p10-20260831-ddacac8",
+    "active_release": "p9tts-20260902-0249-51d51f0",
+    "rollback_release": "p9stt-20260901-1854-76dae93",
     "last_fully_accepted_release": "p8r1-20260831-0916-fca4b1a-b19a035e",
     "access": "tailscale-private-https-wss",
     "funnel": "off",
@@ -133,18 +133,22 @@
         "Qwen Cloud STT provider retained as an optional disabled fallback",
         "Tencent SentenceRecognition provider with TC3 signing and explicit postpay-disabled guard implemented locally",
         "Home Node SenseVoice microphone fallback implemented over bounded authenticated WSS RPC",
-        "server regression: 132 passed, 1 sandbox-only DPAPI skip",
+        "server regression: 136 passed, 1 sandbox-only DPAPI skip",
         "Tencent ASR service activated with postpay disabled",
         "least-privilege CAM subuser and SentenceRecognition-only policy provisioned with old credential rotated out",
         "production Tencent credentials installed as read-only 0400 secrets outside the repository",
         "guarded Tencent STT production release activated with database backup and rollback release retained",
         "real Tencent SentenceRecognition provider smoke passed without retaining transcript evidence",
         "Home Node speech_to_text capability online and real SenseVoice fallback smoke passed",
-        "production runtime secret, transcript, health, database, and Tailnet HTTPS checks passed"
+        "production runtime secret, transcript, health, database, and Tailnet HTTPS checks passed",
+        "free keyless Edge TTS with timeout, empty-audio protection, and text-only degradation implemented",
+        "real local and production-container Edge TTS smoke passed without retaining audio or transcript evidence",
+        "free Cloud TTS production release activated with database backup and STT release retained for rollback",
+        "production TTS status, Tailnet health, debug-endpoint blocking, and sensitive-log scan passed"
       ],
       "pending_gates": [
         "physical iPhone microphone STT acceptance with Home Node offline",
-        "configure and accept Cloud TTS for the complete voice loop"
+        "physical iPhone Edge TTS playback, interrupt, and text-degradation acceptance"
       ]
     },
     "10": "pending"
@@ -161,8 +165,8 @@
     "artifact_version": "0.3.0+3",
     "artifact_sha256": "8805CCBEE0FDDDC52B35F1DE4556926EA5B4A36A8FF8E5EEC230105CB72893F0"
   },
-  "human_gate": "Run physical iPhone microphone acceptance with Home Node offline; no further cloud-console authorization is currently required.",
-  "next_action": "complete physical iPhone microphone STT acceptance, then choose and validate a free-first Cloud TTS path before Phase 10 recovery work",
+  "human_gate": "Run physical iPhone voice-loop acceptance with Home Node offline; no further cloud-console authorization is currently required.",
+  "next_action": "complete physical iPhone Cloud STT plus Edge TTS playback and interrupt acceptance, then close remaining Phase 8/9 physical gates before Phase 10 recovery work",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,
@@ -214,22 +218,25 @@
     "conversation_paging": "automated_pass_physical_pending"
   },
   "phase9": {
-    "release_archive_sha256": "bc6dad8386c7cd5fed254d401179cb7c3fa6a836368df3758f8e4eff65246945",
-    "image_id": "sha256:5f2a86ea65b11d3c659443c188e96036abf62130dc67532f49782371ab2564fe",
-    "pre_activation_database_sha256": "a75abc76634f0e8783789f8620dd52cbaa1ed595c8dad08a0f6066473b81eb7e",
+    "release_archive_sha256": "09290eca5d330136c97ba6b00adb3f20964c0916f98dc893695f92daf5f624fe",
+    "image_id": "sha256:c9cdf1d759cd383dfa61cf38c232a993efe40eb960b0e75bbedc2e53d72c8a69",
+    "pre_activation_database_sha256": "659d18cda09ab22a1b9e1dbcc06f2384aae43d0d2ecfb004126e27f8697a2c16",
     "home_node_state": "online",
     "accepted_capabilities": ["home_node_ping", "speech_to_text", "wechat_conversation_messages", "wechat_original_images", "wechat_search_messages", "wechat_transcribe_voice"],
     "automated_backend_verification": "passed",
     "flutter_analyze": "passed",
     "codemagic_build": "not_required_for_server_and_home_node_only_activation",
-    "physical_app_acceptance": "original_image_user_reported_pass; cloud_microphone_stt_pending",
+    "physical_app_acceptance": "original_image_user_reported_pass; cloud_microphone_stt_and_edge_tts_playback_pending",
     "cloud_stt_implementation": "tencent_sentence_recognition_active_with_postpay_disabled_guard_and_home_node_sensevoice_fallback",
-    "production_release": "p9stt-20260901-1854-76dae93",
-    "rollback_release": "p10-20260831-ddacac8",
+    "production_release": "p9tts-20260902-0249-51d51f0",
+    "rollback_release": "p9stt-20260901-1854-76dae93",
     "cloud_stt_status": "tencent-sentence-recognition available=true",
     "real_provider_smoke": "passed",
     "home_node_fallback_smoke": "passed",
-    "sensitive_runtime_scan": "passed"
+    "sensitive_runtime_scan": "passed",
+    "cloud_tts_implementation": "edge_tts_7_2_8_keyless_with_20_second_timeout_and_text_only_degradation",
+    "cloud_tts_status": "available",
+    "real_tts_smoke": "passed_19584_byte_mp3_not_retained"
   },
   "evidence_root": "docs/evidence/phase9/p9m1-20260831-1238-84d3722-61a2bf90"
 }

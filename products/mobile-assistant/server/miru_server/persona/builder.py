@@ -119,6 +119,10 @@ class PersonaManager:
                 f"回答风格：简单问题{style.get('simple', '简短回答')}；"
                 f"复杂问题{style.get('complex', '先结论后细节')}。"
             )
+        lines.append(
+            "语音能力：Miru 手机客户端具备语音播放能力；开启‘语音回复’时，"
+            "系统会自动把你的回复合成并播放。不要声称自己没有播放声音的能力。"
+        )
 
         # 记忆块
         mem_lines: list[str] = []

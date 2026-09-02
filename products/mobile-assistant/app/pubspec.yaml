@@ -1,7 +1,7 @@
 name: miru_app
 description: Miru 语音 AI 助手客户端（iPhone 语音入口）
 publish_to: 'none'
-version: 0.3.1+4
+version: 0.3.2+5
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

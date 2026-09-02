@@ -10,6 +10,7 @@ from miru_server.tts.base import TTSUnavailable, VoiceConfig
 from miru_server.tts.edge_tts import EdgeTTS
 from miru_server.tts.minimax_tts import MiniMaxTTS
 from miru_server.tts.queue import TTSQueue
+from miru_server.api.ws import _safe_send_audio
 
 
 class FakeProvider:
@@ -43,6 +44,16 @@ class FakeSink:
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def test_closed_websocket_does_not_abort_background_tts_delivery():
+    class ClosedWebSocket:
+        async def send_bytes(self, _payload):
+            raise RuntimeError('Cannot call send after close')
+
+    # A transient iPhone disconnect must not turn a completed text response
+    # into an unhandled background task failure.
+    run(_safe_send_audio(ClosedWebSocket(), b'mp3'))
 
 
 def test_queue_order_and_emit():

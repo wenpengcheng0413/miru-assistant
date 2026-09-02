@@ -1,9 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:miru_app/core/audio/player_service.dart';
 import 'package:miru_app/core/config.dart';
 import 'package:miru_app/core/deployment_profile.dart';
 import 'package:miru_app/core/system_status.dart';
 
 void main() {
+  test('TTS byte source declares the production MP3 MIME type', () {
+    expect(ttsAudioMimeType, 'audio/mpeg');
+  });
+
   test('production profiles require HTTPS and disable Bonjour', () {
     final config = AppConfig()
       ..profile = DeploymentProfile.tailnet

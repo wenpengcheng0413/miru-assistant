@@ -13,6 +13,8 @@ def test_load_and_build_prompt(app_config):
     assert prompt.index("[工具使用规则]") < prompt.index("[禁止事项]")
     assert prompt.index("[禁止事项]") < prompt.index("[当前时间]")
     assert "称呼=老板" in prompt
+    assert "手机客户端具备语音播放能力" in prompt
+    assert "不要声称自己没有播放声音的能力" in prompt
 
 
 def test_missing_persona_falls_back_to_default(app_config):

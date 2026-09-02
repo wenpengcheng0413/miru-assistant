@@ -96,8 +96,8 @@ workflows:
           FLUTTER_APPLICATION_PATH=$PWD
           COCOAPODS_PARALLEL_CODE_SIGN=true
           FLUTTER_BUILD_DIR=build
-          FLUTTER_BUILD_NAME=0.3.1
-          FLUTTER_BUILD_NUMBER=4
+          FLUTTER_BUILD_NAME=0.3.2
+          FLUTTER_BUILD_NUMBER=5
           DART_DEFINES=$DART_DEFINES
           PACKAGE_CONFIG=$PWD/.dart_tool/package_config.json
           EOF

@@ -46,6 +46,14 @@ async def _safe_send(websocket: WebSocket, payload: dict) -> None:
         logger.debug("WS 发送失败（连接可能已断）")
 
 
+async def _safe_send_audio(websocket: WebSocket, payload: bytes) -> None:
+    """发送 TTS 音频；手机切后台或短暂断网时静默丢弃旧连接帧。"""
+    try:
+        await websocket.send_bytes(payload)
+    except Exception:
+        logger.debug("WS TTS 发送失败（连接可能已断）")
+
+
 class VoiceSession:
     """单个连接的语音处理状态：VAD 断句 + 部分识别 + 最终识别。
 
@@ -240,13 +248,13 @@ async def ws_session(websocket: WebSocket) -> None:
         tts_format=hello.get("tts_format", cfg.tts.format),
         tts_sample_rate=int(hello.get("tts_sample_rate", cfg.tts.sample_rate)),
         send_json=lambda p: _safe_send(websocket, p),
-        send_audio=websocket.send_bytes,
+        send_audio=lambda p: _safe_send_audio(websocket, p),
     )
     active = _active_runs.get(ctx.conversation_id)
     if active is not None and not active.task.done():
         ctx = active.ctx
         ctx.send_json = lambda p: _safe_send(websocket, p)
-        ctx.send_audio = websocket.send_bytes
+        ctx.send_audio = lambda p: _safe_send_audio(websocket, p)
         logger.info("重新接管运行中的会话: %s", ctx.conversation_id)
     await _safe_send(websocket, events.hello_ok(
         ctx.conversation_id, persona_name, ctx.tts_format, ctx.tts_sample_rate

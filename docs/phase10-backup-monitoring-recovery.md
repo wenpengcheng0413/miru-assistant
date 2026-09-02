@@ -2,7 +2,7 @@
 
 日期：2026-09-02
 
-状态：本地实现与回归已完成第一批；尚未安装离机备份工具、授权第三方账号或激活生产配置。
+状态：生产 overlay 已激活，首个生产备份校验与隔离恢复演练已通过；离机备份、systemd 调度与故障演练仍待推进。
 
 ## 目标与边界
 
@@ -54,9 +54,21 @@ restic 仓库密码必须存放在 `/opt/miru/secrets/` 的 root-only 文件中�
 6. 从该备份恢复到全新暂存目录，确认会话行数、schema、附件 manifest 和哈希一致。
 7. 仅在全部通过后切换当前 release；失败则恢复旧 release，并保留候选和原数据用于诊断。
 
+## 生产激活结果
+
+- 激活时间：2026-09-03（Asia/Shanghai）。
+- 源提交：`92f047fac0bab29580eff0ad296c54bb7f44166d`。
+- 当前 release：`p10-20260903-0001-92f047f-51aaa8a9`。
+- 回滚 release：`p9tts-20260902-0249-51d51f0`。
+- API 与 Caddy 均为 `running/healthy`，`OOMKilled=false`，重启次数为 0。
+- `/healthz` 返回 `ok`，`/readyz` 的 config、SQLite、services 三项均通过。
+- 生产数据库 schema 为 2，`PRAGMA integrity_check=ok`。
+- `operations.backup` 为 enabled/healthy；数据库 1,396,736 bytes，附件 16 个、2,924,080 bytes。
+- 日备份与周备份校验通过，隔离恢复到全新暂存目录通过；未覆盖生产数据库或切换恢复结果。
+- 激活后容量状态为 normal：磁盘使用率 22.1%，可用约 39,189 MB，Swap 使用约 0.5 MB。
+
 ## 尚未完成
 
-- 生产 overlay 构建、传输和激活。
 - 加密离机仓库初始化及第一次 `restic check`。
 - systemd 定时任务、失败告警和一次完整离机恢复演练。
 - 85% 水位下非必要预览停止策略。

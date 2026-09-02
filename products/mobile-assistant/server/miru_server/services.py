@@ -66,6 +66,7 @@ class Services:
     tts_fallback: TTSProvider | None
     home_node: HomeNodeRegistry
     node_rpc: HomeNodeRpc
+    backup_status: dict
 
 
 def create_services(config: AppConfig) -> Services:
@@ -130,4 +131,13 @@ def create_services(config: AppConfig) -> Services:
         tts_fallback=tts_fallback,
         home_node=home_node,
         node_rpc=HomeNodeRpc(home_node),
+        backup_status={
+            "enabled": config.backup.enabled,
+            "state": "pending" if config.backup.enabled else "disabled",
+            "last_success_at": None,
+            "last_error_code": "",
+            "database_bytes": 0,
+            "attachment_file_count": 0,
+            "attachment_bytes": 0,
+        },
     )

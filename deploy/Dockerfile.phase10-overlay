@@ -2,5 +2,14 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 COPY --chown=miru:miru server/miru_server/api/rest.py /app/miru_server/api/rest.py
+COPY --chown=miru:miru server/miru_server/api/ws.py /app/miru_server/api/ws.py
+COPY --chown=miru:miru server/miru_server/attachments.py /app/miru_server/attachments.py
+COPY --chown=miru:miru server/miru_server/config.py /app/miru_server/config.py
+COPY --chown=miru:miru server/miru_server/db/backup.py /app/miru_server/db/backup.py
+COPY --chown=miru:miru server/miru_server/main.py /app/miru_server/main.py
 COPY --chown=miru:miru server/miru_server/memory/store.py /app/miru_server/memory/store.py
+COPY --chown=miru:miru server/miru_server/operations.py /app/miru_server/operations.py
+COPY --chown=miru:miru server/miru_server/persona/builder.py /app/miru_server/persona/builder.py
+COPY --chown=miru:miru server/miru_server/services.py /app/miru_server/services.py
 COPY --chown=miru:miru server/miru_server/tools/builtin/wechat_node.py /app/miru_server/tools/builtin/wechat_node.py
+COPY --chown=miru:miru server/scripts/backup_admin.py /app/scripts/backup_admin.py

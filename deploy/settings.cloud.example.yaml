@@ -68,9 +68,10 @@ db:
   path: ./data/miru_server.db
 
 backup:
-  enabled: false
+  enabled: true
   dir: ./data/backups
-  retention_days: 7
+  retention_days: 14
+  weekly_retention_weeks: 8
 
 attachments:
   dir: ./data/attachments
@@ -78,3 +79,7 @@ attachments:
   max_images_per_turn: 4
   max_preview_pages: 4
   max_extracted_chars_per_turn: 20000
+  soft_quota_gb: 10
+  disk_warning_percent: 70
+  disk_preview_stop_percent: 85
+  disk_upload_stop_percent: 90

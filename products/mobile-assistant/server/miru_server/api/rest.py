@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import io
 import json
 import uuid
 import wave
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -14,11 +14,11 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select, text
 
 from ..attachments import save_upload
-from ..db.models import ApiUsage, Attachment, Conversation, Message, TurnTrace
-from ..wechat_runtime import sync_snapshot, sync_status
+from ..db.models import Attachment, Conversation, Message, TurnTrace
 from ..documents import extract as extract_document
+from ..operations import capacity_snapshot
 from ..stt.base import STTUnavailable
-from ..tts.base import VoiceConfig
+from ..wechat_runtime import sync_snapshot, sync_status
 from .deps import verify_rest_token
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_rest_token)])
@@ -77,6 +77,15 @@ async def readyz(request: Request):
 
 def build_safe_status(services) -> dict:
     cfg = services.config
+    backup_status = getattr(services, "backup_status", {
+        "enabled": cfg.backup.enabled,
+        "state": "pending" if cfg.backup.enabled else "disabled",
+        "last_success_at": None,
+        "last_error_code": "",
+        "database_bytes": 0,
+        "attachment_file_count": 0,
+        "attachment_bytes": 0,
+    })
     cloud_tools = services.tools.enabled_names
     voice_available = services.tts_provider is not None
     voice_reason = "" if voice_available else "provider_not_configured"
@@ -110,6 +119,10 @@ def build_safe_status(services) -> dict:
             "version": __import__("miru_server").__version__,
         },
         "home_node": node.public_dict(),
+        "operations": {
+            "backup": dict(backup_status),
+            "capacity": capacity_snapshot(cfg.resolve(cfg.attachments.dir)),
+        },
         "capabilities": {
             "chat": "available" if cfg.llm.api_key else "unavailable",
             "streaming": "available" if cfg.llm.api_key else "unavailable",

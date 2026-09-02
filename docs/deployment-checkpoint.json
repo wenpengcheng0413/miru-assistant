@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-02T02:56:51+08:00",
+  "updated_at": "2026-09-02T23:30:23+08:00",
   "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
   "git": {
     "branch": "master",
@@ -15,7 +15,7 @@
     "phase9_voice_transcription_commit": "ad77988",
     "phase9_original_image_relay_commit": "8cfd6ca",
     "phase9_media_overlay_commit": "84d3722",
-    "push_state": "Tencent STT commit 76dae93 and free Cloud TTS commit 51d51f0 are pushed to origin/master",
+    "push_state": "Tencent STT commit 76dae93, free Cloud TTS commit 51d51f0, and iPhone playback fix b70e490 are pushed to origin/master",
     "dirty_worktree_preserved": true
   },
   "production": {
@@ -144,14 +144,38 @@
         "free keyless Edge TTS with timeout, empty-audio protection, and text-only degradation implemented",
         "real local and production-container Edge TTS smoke passed without retaining audio or transcript evidence",
         "free Cloud TTS production release activated with database backup and STT release retained for rollback",
-        "production TTS status, Tailnet health, debug-endpoint blocking, and sensitive-log scan passed"
+        "production TTS status, Tailnet health, debug-endpoint blocking, and sensitive-log scan passed",
+        "physical iPhone microphone STT recognition passed through the production Tencent provider",
+        "physical iPhone Edge TTS playback passed with client 0.3.2+5"
       ],
       "pending_gates": [
-        "physical iPhone microphone STT acceptance with Home Node offline",
-        "physical iPhone Edge TTS playback, interrupt, and text-degradation acceptance"
+        "physical iPhone Edge TTS interrupt acceptance",
+        "physical iPhone TTS-unavailable text-degradation acceptance"
       ]
     },
-    "10": "pending"
+    "10": {
+      "state": "implementation_in_progress",
+      "completed_gates": [
+        "atomic SQLite Backup API snapshot with integrity, SHA-256, schema, and row-count verification",
+        "content-free attachment manifest with hashed relative identifiers",
+        "14 daily and 8 weekly local retention policy",
+        "restore restricted to a new staging directory with post-restore verification",
+        "safe aggregate backup and capacity status added to authenticated system status",
+        "70/85/90 percent disk pressure classification",
+        "10GB attachment soft quota and critical-disk new-upload refusal while text chat remains available",
+        "operator create, verify, and staging-restore CLI with bounded output",
+        "server regression: 148 passed, 1 sandbox-only DPAPI skip"
+      ],
+      "pending_gates": [
+        "production overlay build, transfer, activation, and rollback verification",
+        "first production daily and weekly snapshot verification",
+        "isolated production restore drill",
+        "encrypted off-host repository authorization and activation",
+        "systemd schedule and content-free failure alerting",
+        "85 percent preview restriction and 85/90 percent disk drills",
+        "SQLite corruption, Cloud restart, OOM marker, and token-revocation drills"
+      ]
+    }
   },
   "ci": {
     "provider": "codemagic",
@@ -160,13 +184,13 @@
     "base_url_configured": true,
     "app_token_in_ci": false,
     "github_webhook": "active",
-    "build_number": 58,
+    "build_number": 68,
     "build_status": "passed",
-    "artifact_version": "0.3.0+3",
-    "artifact_sha256": "8805CCBEE0FDDDC52B35F1DE4556926EA5B4A36A8FF8E5EEC230105CB72893F0"
+    "artifact_version": "0.3.2+5",
+    "artifact_sha256": "0BEB3124EFFF6D3F6E5D315A4EDA3722C8544795813B8ECC09A3890145BCEB8D"
   },
-  "human_gate": "Run physical iPhone voice-loop acceptance with Home Node offline; no further cloud-console authorization is currently required.",
-  "next_action": "complete physical iPhone Cloud STT plus Edge TTS playback and interrupt acceptance, then close remaining Phase 8/9 physical gates before Phase 10 recovery work",
+  "human_gate": "Run physical iPhone TTS interrupt and forced-unavailable text-degradation acceptance; no further cloud-console authorization is currently required.",
+  "next_action": "commit and push the verified Phase 10 implementation, then request authorization for production overlay activation and the separately scoped encrypted off-host backup account connection",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,
@@ -225,8 +249,8 @@
     "accepted_capabilities": ["home_node_ping", "speech_to_text", "wechat_conversation_messages", "wechat_original_images", "wechat_search_messages", "wechat_transcribe_voice"],
     "automated_backend_verification": "passed",
     "flutter_analyze": "passed",
-    "codemagic_build": "not_required_for_server_and_home_node_only_activation",
-    "physical_app_acceptance": "original_image_user_reported_pass; cloud_microphone_stt_and_edge_tts_playback_pending",
+    "codemagic_build": "build_68_passed_for_client_0.3.2+5",
+    "physical_app_acceptance": "original_image_user_reported_pass; production_tencent_microphone_stt_pass; edge_tts_playback_pass_on_client_0.3.2+5; interrupt_and_forced_degradation_pending",
     "cloud_stt_implementation": "tencent_sentence_recognition_active_with_postpay_disabled_guard_and_home_node_sensevoice_fallback",
     "production_release": "p9tts-20260902-0249-51d51f0",
     "rollback_release": "p9stt-20260901-1854-76dae93",

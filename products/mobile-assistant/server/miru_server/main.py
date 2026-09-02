@@ -10,8 +10,8 @@ import contextlib
 import logging
 import os
 import secrets
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import uvicorn
 from fastapi import FastAPI
@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api import node_media, node_ws, rest, ws
 from .config import AppConfig
-from .db.backup import backup_database
+from .db.backup import create_verified_backup, verify_backup
 from .discovery import LanServiceAdvertiser
 from .logging_setup import setup_logging
 from .services import create_services
@@ -87,14 +87,40 @@ def create_app(config: AppConfig) -> FastAPI:
             async def _backup_loop() -> None:
                 while True:
                     try:
-                        saved = await asyncio.to_thread(
-                            backup_database,
+                        result = await asyncio.to_thread(
+                            create_verified_backup,
                             config.resolve(config.db.path),
                             config.resolve(config.backup.dir),
-                            config.backup.retention_days,
+                            attachment_dir=config.resolve(config.attachments.dir),
+                            retention_days=config.backup.retention_days,
+                            weekly_retention_weeks=config.backup.weekly_retention_weeks,
                         )
-                        logger.info("Miru 数据库备份完成: %s", saved)
+                        verified = await asyncio.to_thread(
+                            verify_backup,
+                            result.database,
+                            result.manifest,
+                        )
+                        services.backup_status.update({
+                            "state": "healthy",
+                            "last_success_at": datetime.now(timezone.utc).isoformat(),
+                            "last_error_code": "",
+                            "database_bytes": verified["database_bytes"],
+                            "attachment_file_count": verified["attachment_file_count"],
+                            "attachment_bytes": verified["attachment_bytes"],
+                        })
+                        logger.info(
+                            "Miru verified backup completed: created=%s database_bytes=%d "
+                            "attachment_files=%d attachment_bytes=%d",
+                            result.created,
+                            verified["database_bytes"],
+                            verified["attachment_file_count"],
+                            verified["attachment_bytes"],
+                        )
                     except Exception as exc:
+                        services.backup_status.update({
+                            "state": "failed",
+                            "last_error_code": "backup_failed",
+                        })
                         logger.warning(
                             "Miru 数据库备份失败: exception_type=%s error_code=backup_failed",
                             type(exc).__name__,

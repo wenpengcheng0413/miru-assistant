@@ -153,7 +153,8 @@ class BackupConfig(BaseModel):
 
     enabled: bool = True
     dir: str = "./data/backups"
-    retention_days: int = 30
+    retention_days: int = Field(default=14, ge=1, le=366)
+    weekly_retention_weeks: int = Field(default=8, ge=1, le=104)
 
 
 class AttachmentConfig(BaseModel):
@@ -164,6 +165,18 @@ class AttachmentConfig(BaseModel):
     max_images_per_turn: int = 10
     max_preview_pages: int = 10
     max_extracted_chars_per_turn: int = Field(default=80_000, ge=10_000, le=200_000)
+    soft_quota_gb: int = Field(default=10, ge=1, le=1024)
+    disk_warning_percent: int = Field(default=70, ge=1, le=99)
+    disk_preview_stop_percent: int = Field(default=85, ge=1, le=99)
+    disk_upload_stop_percent: int = Field(default=90, ge=1, le=99)
+
+    def model_post_init(self, __context: object, /) -> None:
+        if not (
+            self.disk_warning_percent
+            < self.disk_preview_stop_percent
+            < self.disk_upload_stop_percent
+        ):
+            raise ValueError("attachment disk thresholds must increase from warning to upload stop")
 
 
 class HomeNodeConfig(BaseModel):

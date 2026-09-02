@@ -6,10 +6,10 @@ import hashlib
 import io
 import math
 import re
+import shutil
 import struct
 import uuid
-from pathlib import Path
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from fastapi import HTTPException, UploadFile
 
@@ -85,6 +85,32 @@ class AttachmentStorage:
         return storage_key, self.key_path(storage_key)
 
 
+def _stored_bytes(root: Path) -> int:
+    total = 0
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            continue
+        if path.is_file():
+            total += path.stat().st_size
+    return total
+
+
+def enforce_storage_capacity(
+    storage: AttachmentStorage,
+    config: AttachmentConfig,
+    incoming_bytes: int,
+) -> None:
+    """Protect text chat by refusing only new attachments at critical pressure."""
+    storage.ensure()
+    usage = shutil.disk_usage(storage.root)
+    used_percent = ((usage.total - usage.free) / max(usage.total, 1)) * 100
+    if used_percent >= config.disk_upload_stop_percent:
+        raise HTTPException(507, "存储空间不足，暂时只支持文字聊天")
+    quota = config.soft_quota_gb * 1024 * 1024 * 1024
+    if _stored_bytes(storage.root) + incoming_bytes > quota:
+        raise HTTPException(507, "附件空间已达到软配额，暂时只支持文字聊天")
+
+
 async def save_upload(
     upload: UploadFile,
     root: str | Path | AttachmentStorage,
@@ -100,7 +126,7 @@ async def save_upload(
     media_type, kind, extension = detect_type(data, filename)
     attachment_id = uuid.uuid4().hex
     storage = root if isinstance(root, AttachmentStorage) else AttachmentStorage(root)
-    storage.ensure()
+    enforce_storage_capacity(storage, config, len(data))
     final_name = filename if Path(filename).suffix else f"{filename}{extension}"
     storage_key, path = storage.path_for(attachment_id, final_name)
     path.parent.mkdir(parents=True, exist_ok=False)

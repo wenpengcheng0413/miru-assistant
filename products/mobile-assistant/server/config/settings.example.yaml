@@ -114,7 +114,8 @@ db:
 backup:
   enabled: true
   dir: ./data/backups
-  retention_days: 30
+  retention_days: 14
+  weekly_retention_weeks: 8
 
 attachments:
   dir: ./data/attachments
@@ -122,6 +123,10 @@ attachments:
   max_images_per_turn: 10
   max_preview_pages: 10
   max_extracted_chars_per_turn: 80000  # 文档正文进入单轮模型上下文的总字符上限
+  soft_quota_gb: 10
+  disk_warning_percent: 70
+  disk_preview_stop_percent: 85
+  disk_upload_stop_percent: 90
 
 home_node:
   enabled: false

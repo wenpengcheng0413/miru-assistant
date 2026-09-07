@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Miru verified production backup check
+
+[Timer]
+OnCalendar=*-*-* 03:17:00 Asia/Shanghai
+RandomizedDelaySec=15m
+AccuracySec=1m
+Persistent=true
+Unit=miru-backup.service
+
+[Install]
+WantedBy=timers.target

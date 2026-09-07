@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-03T05:59:38+08:00",
+  "updated_at": "2026-09-07T12:19:50+08:00",
   "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
   "git": {
     "branch": "master",
@@ -155,7 +155,7 @@
       ]
     },
     "10": {
-      "state": "production_active_recovery_verified",
+      "state": "production_active_schedule_prepared",
       "completed_gates": [
         "atomic SQLite Backup API snapshot with integrity, SHA-256, schema, and row-count verification",
         "content-free attachment manifest with hashed relative identifiers",
@@ -170,11 +170,13 @@
         "API and Caddy running healthy with zero restarts and no OOM",
         "production health, readiness, schema 2, and SQLite integrity checks passed",
         "first production daily and weekly snapshot verification passed",
-        "isolated production staging-only restore drill passed"
+        "isolated production staging-only restore drill passed",
+        "systemd daily scheduler and content-free local failure marker implemented",
+        "server regression: 152 passed, 1 sandbox-only DPAPI skip"
       ],
       "pending_gates": [
         "encrypted off-host repository authorization and activation",
-        "systemd schedule and content-free failure alerting",
+        "production installation and enablement of the systemd backup schedule",
         "controlled Phase 10 rollback and re-activation drill",
         "85 percent preview restriction and 85/90 percent disk drills",
         "SQLite corruption, Cloud restart, OOM marker, and token-revocation drills"
@@ -193,8 +195,8 @@
     "artifact_version": "0.3.2+5",
     "artifact_sha256": "0BEB3124EFFF6D3F6E5D315A4EDA3722C8544795813B8ECC09A3890145BCEB8D"
   },
-  "human_gate": "Choose and authorize the encrypted off-host backup destination before third-party OAuth or remote backup transfer; physical iPhone TTS interrupt and forced-unavailable text-degradation acceptance also remain pending.",
-  "next_action": "add and validate the systemd backup schedule and content-free failure reporting, then connect the user-approved free off-host destination and run restic check plus an isolated recovery drill",
+  "human_gate": "Authorize installation and enablement of the reviewed systemd timer on the production host; separately choose and authorize the encrypted off-host backup destination before third-party OAuth or remote backup transfer.",
+  "next_action": "verify the committed systemd units with the production host's systemd-analyze, then request action-time authorization to install and enable the timer",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,

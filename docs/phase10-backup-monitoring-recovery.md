@@ -67,16 +67,23 @@ restic 仓库密码必须存放在 `/opt/miru/secrets/` 的 root-only 文件中�
 - 日备份与周备份校验通过，隔离恢复到全新暂存目录通过；未覆盖生产数据库或切换恢复结果。
 - 激活后容量状态为 normal：磁盘使用率 22.1%，可用约 39,189 MB，Swap 使用约 0.5 MB。
 
+## systemd 调度准备
+
+- 已增加每日 03:17（Asia/Shanghai）、最多 15 分钟随机延迟、支持漏跑补执行的持久化 timer。
+- service 通过当前生产 Compose 容器执行同一套 `backup_admin.py create`，命令本身完成创建与校验并以退出码报告失败。
+- 失败 unit 只写入固定 journald 标记 `MIRU_BACKUP_ALERT=backup_failed`，不包含路径、文件名、消息内容、附件名称或 Secret Value，也不对外发送数据。
+- 单元文件尚未安装到生产 `/etc/systemd/system/`，也未启用 timer；这一步属于持久化服务器配置变更，等待单独授权。
+
 ## 尚未完成
 
 - 加密离机仓库初始化及第一次 `restic check`。
-- systemd 定时任务、失败告警和一次完整离机恢复演练。
+- 生产安装并启用 systemd 定时任务，以及一次完整离机恢复演练。
 - 85% 水位下非必要预览停止策略。
 - Token 撤销、SQLite corruption、容器重启和磁盘 85%/90% 演练。
 
 ## 本地验证
 
-- 服务端完整回归：148 passed，1 skipped（仅沙箱 DPAPI）。
+- 服务端完整回归：152 passed，1 skipped（仅沙箱 DPAPI；包含 4 项 systemd 静态安全检查）。
 - Phase 10 新增模块 Ruff 校验：通过。
 - JSON/YAML 配置解析：通过。
 - 备份篡改、清单隐私、轮换、暂存恢复、磁盘阈值和操作员 CLI 均有自动化覆盖。

@@ -1,0 +1,10 @@
+[Unit]
+Description=Record content-free Miru backup failure marker for %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -p daemon.err -t miru-backup MIRU_BACKUP_ALERT=backup_failed
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

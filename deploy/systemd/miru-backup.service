@@ -1,0 +1,19 @@
+[Unit]
+Description=Miru verified production backup
+Requires=docker.service
+After=docker.service
+OnFailure=miru-backup-failure@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/miru/app/current
+ExecStart=/usr/bin/docker compose -p miru-prod --env-file .release.env -f config/compose.production.yaml exec -T miru-api python /app/scripts/backup_admin.py create --database /app/data/miru_server.db --destination /app/data/backups --attachments /app/data/attachments --daily 14 --weekly 8
+TimeoutStartSec=15min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

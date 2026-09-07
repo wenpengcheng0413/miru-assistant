@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-07T12:19:50+08:00",
+  "updated_at": "2026-09-07T14:06:41+08:00",
   "roadmap_source": "Miru Cloud + Home Node 专项实施设计.md",
   "git": {
     "branch": "master",
@@ -16,7 +16,8 @@
     "phase9_original_image_relay_commit": "8cfd6ca",
     "phase9_media_overlay_commit": "84d3722",
     "phase10_implementation_commit": "92f047fac0bab29580eff0ad296c54bb7f44166d",
-    "push_state": "origin/master contains the Phase 10 implementation commit 92f047fac0bab29580eff0ad296c54bb7f44166d; this checkpoint records its production activation",
+    "phase10_systemd_schedule_commit": "e4bf2069cc36474b2fc706293c5243ae1d8d12e0",
+    "push_state": "origin/master contains the Phase 10 production implementation and verified systemd schedule through e4bf2069cc36474b2fc706293c5243ae1d8d12e0; this checkpoint records production installation and enablement",
     "dirty_worktree_preserved": true
   },
   "production": {
@@ -155,7 +156,7 @@
       ]
     },
     "10": {
-      "state": "production_active_schedule_prepared",
+      "state": "production_active_schedule_enabled",
       "completed_gates": [
         "atomic SQLite Backup API snapshot with integrity, SHA-256, schema, and row-count verification",
         "content-free attachment manifest with hashed relative identifiers",
@@ -172,11 +173,13 @@
         "first production daily and weekly snapshot verification passed",
         "isolated production staging-only restore drill passed",
         "systemd daily scheduler and content-free local failure marker implemented",
-        "server regression: 152 passed, 1 sandbox-only DPAPI skip"
+        "server regression: 152 passed, 1 sandbox-only DPAPI skip",
+        "production systemd units installed and re-verified",
+        "production systemd backup service manually passed with integrity ok",
+        "production backup timer enabled and active/waiting"
       ],
       "pending_gates": [
         "encrypted off-host repository authorization and activation",
-        "production installation and enablement of the systemd backup schedule",
         "controlled Phase 10 rollback and re-activation drill",
         "85 percent preview restriction and 85/90 percent disk drills",
         "SQLite corruption, Cloud restart, OOM marker, and token-revocation drills"
@@ -195,8 +198,8 @@
     "artifact_version": "0.3.2+5",
     "artifact_sha256": "0BEB3124EFFF6D3F6E5D315A4EDA3722C8544795813B8ECC09A3890145BCEB8D"
   },
-  "human_gate": "Authorize installation and enablement of the reviewed systemd timer on the production host; separately choose and authorize the encrypted off-host backup destination before third-party OAuth or remote backup transfer.",
-  "next_action": "verify the committed systemd units with the production host's systemd-analyze, then request action-time authorization to install and enable the timer",
+  "human_gate": "Choose and authorize the encrypted off-host backup destination before third-party OAuth, package installation, repository initialization, or remote backup transfer; controlled production fault drills require separate action-time authorization.",
+  "next_action": "prepare the free-first encrypted off-host backup destination decision and the remaining controlled Phase 10 fault-drill runbook without connecting or transmitting data",
   "memory_migration": {
     "source_rows": 90,
     "inserted_rows": 89,
@@ -279,7 +282,12 @@
     "database": "schema_2_integrity_ok",
     "backup_verify": "passed_daily_and_weekly",
     "staging_restore": "passed_without_promotion",
-    "capacity": "normal_disk_22.1_percent_swap_0.5_mb"
+    "capacity": "normal_disk_22.1_percent_swap_0.5_mb",
+    "systemd_schedule_commit": "e4bf2069cc36474b2fc706293c5243ae1d8d12e0",
+    "systemd_install": "passed_installed_units_reverified",
+    "manual_scheduled_backup": "passed_result_success_exit_0_integrity_ok_schema_2_database_1437696_bytes_attachments_20_files_2947974_bytes",
+    "timer": "enabled_active_waiting_next_2026-09-08T03:23:40+08:00",
+    "post_enable_health": "api_and_caddy_running_healthy_zero_restarts_no_oom"
   },
   "evidence_root": "docs/evidence/phase10/p10-20260903-0001-92f047f-51aaa8a9"
 }

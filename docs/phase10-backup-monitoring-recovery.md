@@ -2,7 +2,7 @@
 
 日期：2026-09-02
 
-状态：生产 overlay 已激活，首个生产备份校验与隔离恢复演练已通过；离机备份、systemd 调度与故障演练仍待推进。
+状态：生产 overlay 已激活，首个生产备份校验与隔离恢复演练已通过；生产 systemd 调度已安装启用，离机备份与故障演练仍待推进。
 
 ## 目标与边界
 
@@ -67,17 +67,20 @@ restic 仓库密码必须存放在 `/opt/miru/secrets/` 的 root-only 文件中�
 - 日备份与周备份校验通过，隔离恢复到全新暂存目录通过；未覆盖生产数据库或切换恢复结果。
 - 激活后容量状态为 normal：磁盘使用率 22.1%，可用约 39,189 MB，Swap 使用约 0.5 MB。
 
-## systemd 调度准备
+## systemd 调度生产启用结果
 
 - 已增加每日 03:17（Asia/Shanghai）、最多 15 分钟随机延迟、支持漏跑补执行的持久化 timer。
 - service 通过当前生产 Compose 容器执行同一套 `backup_admin.py create`，命令本身完成创建与校验并以退出码报告失败。
 - 失败 unit 只写入固定 journald 标记 `MIRU_BACKUP_ALERT=backup_failed`，不包含路径、文件名、消息内容、附件名称或 Secret Value，也不对外发送数据。
-- 单元文件尚未安装到生产 `/etc/systemd/system/`，也未启用 timer；这一步属于持久化服务器配置变更，等待单独授权。
+- 2026-09-07 已从锁定提交 `e4bf2069cc36474b2fc706293c5243ae1d8d12e0` 将三个单元安装到生产 `/etc/systemd/system/`；安装前确认无同名单元，安装后 `systemd-analyze verify` 通过。
+- 启用 timer 前已手动运行 `miru-backup.service`：`Result=success`、`ExecMainStatus=0`、数据库完整性 `ok`、schema 2；本次核验数据库 1,437,696 bytes，附件 20 个、2,949,794 bytes。
+- `miru-backup.timer` 已 `enabled` 且 `active/waiting`；含随机延迟的下一次执行为 2026-09-08 03:23:40（Asia/Shanghai）。
+- 启用后的 API 与 Caddy 均为 `running/healthy`，`OOMKilled=false`，重启次数为 0。
 
 ## 尚未完成
 
 - 加密离机仓库初始化及第一次 `restic check`。
-- 生产安装并启用 systemd 定时任务，以及一次完整离机恢复演练。
+- 一次完整离机恢复演练。
 - 85% 水位下非必要预览停止策略。
 - Token 撤销、SQLite corruption、容器重启和磁盘 85%/90% 演练。
 

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .migrations import apply_migrations
 from .models import Base
+from ..finance import models as finance_models  # register ledger tables with Base
 
 engine = None
 SessionLocal: sessionmaker[Session] | None = None

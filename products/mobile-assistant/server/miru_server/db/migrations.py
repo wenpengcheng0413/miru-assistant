@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 from sqlalchemy import Connection, text
 
-LATEST_SCHEMA_VERSION = 2
+LATEST_SCHEMA_VERSION = 3
 Migration = Callable[[Connection], None]
 
 
@@ -38,9 +38,17 @@ def _attachment_storage_key(conn: Connection) -> None:
         conn.execute(text("ALTER TABLE attachments ADD COLUMN storage_key TEXT NOT NULL DEFAULT ''"))
 
 
+def _finance_tables(conn: Connection) -> None:
+    from ..finance.models import FinancePairing, FinanceSnapshot, FinanceSource, FinanceReconciliation
+
+    for model in (FinanceSource, FinancePairing, FinanceSnapshot, FinanceReconciliation):
+        model.__table__.create(conn, checkfirst=True)
+
+
 MIGRATIONS: dict[int, Migration] = {
     1: _legacy_baseline,
     2: _attachment_storage_key,
+    3: _finance_tables,
 }
 
 

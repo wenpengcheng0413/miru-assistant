@@ -147,6 +147,7 @@ def build_registry(config: Any) -> ToolRegistry:
     )
     from .builtin.system import GetCurrentTimeTool
     from .builtin.home_node import HomeNodePingTool
+    from .builtin.finance import FINANCE_TOOLS
     enabled = list(config.tools.enabled)
     tools: list[type[Tool]] = [
         GetCurrentTimeTool,
@@ -158,6 +159,7 @@ def build_registry(config: Any) -> ToolRegistry:
         ApiCostReportTool,
         ApiBudgetSetTool,
         HomeNodePingTool,
+        *FINANCE_TOOLS,
     ]
     profile = getattr(config, "profile", "development")
     if profile == "cloud":

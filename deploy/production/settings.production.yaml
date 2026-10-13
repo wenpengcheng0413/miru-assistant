@@ -62,6 +62,10 @@ tools:
     - memory_search
     - api_cost_report
     - api_budget_set
+    - finance_summary
+    - finance_transactions
+    - finance_transaction_get
+    - finance_sync_status
     - home_node_ping
     - wechat_conversation_messages
     - wechat_original_images

@@ -17,7 +17,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import node_media, node_ws, rest, ws
+from .api import finance, node_media, node_ws, rest, ws
 from .config import AppConfig
 from .db.backup import create_verified_backup, verify_backup
 from .discovery import LanServiceAdvertiser
@@ -173,6 +173,8 @@ def create_app(config: AppConfig) -> FastAPI:
     app.include_router(node_media.router)
     app.include_router(rest.public_router)
     app.include_router(rest.router)
+    app.include_router(finance.router)
+    app.include_router(finance.sync_router)
 
     @app.get("/")
     async def root():

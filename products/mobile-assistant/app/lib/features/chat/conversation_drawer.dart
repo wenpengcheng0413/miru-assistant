@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'chat_controller.dart';
+import '../finance/finance_screen.dart';
 
 class ConversationDrawer extends StatefulWidget {
   const ConversationDrawer({super.key, required this.controller});
@@ -36,6 +37,18 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
           animation: c,
           builder: (context, _) => Column(
             children: [
+              ListTile(
+                leading: const Icon(Icons.account_balance_wallet_outlined),
+                title: const Text('我的账本'),
+                subtitle: const Text('Cashew 收支与明细'),
+                onTap: () {
+                  final navigator = Navigator.of(context);
+                  navigator.pop();
+                  navigator.push(MaterialPageRoute<void>(
+                    builder: (_) => FinanceScreen(config: c.config),
+                  ));
+                },
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
                 child: Row(

@@ -10,7 +10,7 @@ class ApiCostReportTool(Tool):
     name = "api_cost_report"
     description = (
         "查询 AI API 花费：总额、按服务商/按模型分桶、按天趋势。"
-        "用户问'这个月花了多少钱/最近七天消耗/哪个模型最贵'时使用。"
+        "仅用户问 AI 调用成本、模型消耗时使用；生活收支、记账和消费请用 finance_summary。"
     )
     parameters = {
         "type": "object",

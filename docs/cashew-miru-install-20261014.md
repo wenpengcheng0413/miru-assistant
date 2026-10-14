@@ -1,6 +1,8 @@
 # Cashew 与米汝：安装及首次配对
 
-两个安装包已成功构建，服务端账本功能已上线。手机尚未安装、配对，云端当前没有收到真实账本。
+两个安装包已成功构建，服务端账本功能已上线。2026-10-14 后续排查确认手机已完成配对，但首次账本上传尚未成功；请使用下方 Cashew 418 修复版。
+
+**后续修复：Cashew 请使用 418 版。** 417 版在包含钱包设置/预算筛选枚举时可能已配对但无法首次上传；修复与更新方法见 [配对问题修复记录](cashew-miru-pairing-fix-20261014.md)。Miru 仍使用 0.3.3（6）。
 
 ## 1. 安装前保存账本
 
@@ -11,9 +13,9 @@
 | App | 版本 | 构建下载页 |
 |---|---|---|
 | Miru | 0.3.3（6） | [Codemagic #69](https://codemagic.io/app/6a7d2b2285432d3d8f060eea/build/6ace5cd95ed1bb68af7d8c3e) |
-| Cashew | 5.4.3（417） | [Codemagic #20](https://codemagic.io/app/6a106336e948beff964378b5/build/6ace5dbe5ed1bb68af7d90de) |
+| Cashew | 5.4.3（418） | [Codemagic #21](https://codemagic.io/app/6a106336e948beff964378b5/build/6acf04f312cce3cb996488c3) |
 
-进入构建页的 Artifacts 下载 Miru.ipa 或 Runner.ipa。这台电脑也已保存到工作区 `data/finance-build/Miru-0.3.3-6.ipa` 和 `Cashew-5.4.3-417.ipa`。
+进入构建页的 Artifacts 下载 Miru.ipa 或 Runner.ipa。这台电脑也已保存到工作区 `data/finance-build/Miru-0.3.3-6.ipa` 和 `Cashew-5.4.3-418.ipa`。
 
 Cashew 保留你上次构建使用的中文导入修复，未改变本地数据库 schema 46。安装后先打开 Cashew，确认原来的账单仍在，再连接同步。
 
@@ -40,7 +42,7 @@ Cashew 保留你上次构建使用的中文导入修复，未改变本地数据�
 - 两个 IPA 的 ZIP 完整性、包内版本和应用 ID 已核实。
 - Miru `com.miru.miruApp`，Cashew `com.budget.tracker-app`。
 - 服务端部署、鉴权、未配对/未同步响应、备份和兼容回退版本已验证；家庭节点在线。
-- 真实手机安装、数据保留、Keychain 读写及首次同步仍需设备验证。
+- 用户已安装原版并完成服务器配对；418 版首次完整同步仍需更新后验证。
 
 SHA-256：
 
@@ -48,6 +50,6 @@ SHA-256：
 Miru-0.3.3-6.ipa
 5b60355a9da9fb2421a1bcc900afc8206eda8ad05ccab01a9bc3320bbe43bbe9
 
-Cashew-5.4.3-417.ipa
-e3a01f0346eac05a473538c5cc9b7cce31457b632d6f2cce3d602683012b398a
+Cashew-5.4.3-418.ipa
+c2da75a6d25e5bbd2297d813f44f2376cfffc139b112c8fe46f50d5c7a3c44a2
 ```

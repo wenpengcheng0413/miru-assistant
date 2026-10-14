@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/config.dart';
@@ -12,7 +14,7 @@ class FinanceScreen extends StatefulWidget {
   State<FinanceScreen> createState() => _FinanceScreenState();
 }
 
-class _FinanceScreenState extends State<FinanceScreen> {
+class _FinanceScreenState extends State<FinanceScreen> with WidgetsBindingObserver {
   late final FinanceApi _api;
   final _search = TextEditingController();
   Map<String, dynamic>? _status, _summary, _catalogs;
@@ -22,19 +24,54 @@ class _FinanceScreenState extends State<FinanceScreen> {
   String _error = '';
   bool _loading = true, _more = false, _action = false;
   int _generation = 0, _total = 0;
+  Timer? _refreshTimer;
+  bool _checking = false;
 
   @override
   void initState() {
     super.initState();
     _api = widget.api ?? FinanceApi(widget.config);
+    WidgetsBinding.instance.addObserver(this);
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _checkForUpdates());
     _reload();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
     _api.close();
     _search.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkForUpdates();
+  }
+
+  Future<void> _checkForUpdates() async {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (!mounted || _checking || _loading || _more || _action ||
+        (lifecycle != null && lifecycle != AppLifecycleState.resumed) ||
+        ModalRoute.of(context)?.isCurrent == false) return;
+    _checking = true;
+    final generation = _generation;
+    try {
+      final status = await _api.get('status');
+      if (!mounted || generation != _generation) return;
+      if (_error.isNotEmpty || status['revision'] != _status?['revision'] ||
+          status['paired'] != _status?['paired'] ||
+          (status['reconciliation'] as Map?)?['snapshot_id'] !=
+              (_status?['reconciliation'] as Map?)?['snapshot_id']) {
+        await _reload();
+      }
+    } catch (_) {
+      // Preserve the last successful view during a temporary connection loss.
+      // Its timestamp remains visible; the next foreground check retries.
+    } finally {
+      _checking = false;
+    }
   }
 
   String _date(DateTime date) => '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
@@ -184,6 +221,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
         if (_error.isNotEmpty) Card(child: Padding(padding: const EdgeInsets.all(16), child: Text(_error))),
         if (_status != null) Text(_status!['synced_at'] == null ? '尚未同步' :
           '数据更新于 ${DateTime.tryParse(_status!['synced_at'] as String)?.toLocal().toString().split('.').first ?? _status!['synced_at']} · ${_status!['transaction_count']} 笔'),
+        const Text('Cashew 联网并在前台时自动上传；切回这里会检查更新，账本打开时每 10 秒检查一次。'),
         if (_status?['paired'] == false) const Text('上传权限已撤销，目前显示上一次同步的数据。'),
         if (pending != null) Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('需要核对：当前 ${_status?['transaction_count']} 笔，新账本 ${pending['transaction_count']} 笔。可能来自删除或恢复备份。'),

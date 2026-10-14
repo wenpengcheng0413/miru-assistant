@@ -17,6 +17,7 @@ from .schema import Snapshot
 SOURCE = "cashew"
 SHANGHAI = timezone(timedelta(hours=8))
 POLICY = "按原币计算已支付收支；排除待支付、跳过、转账、余额调整和借贷；日期按源账单日期。"
+LEDGER_COLLECTIONS = ("wallets", "categories", "budgets", "objectives", "transactions")
 
 
 class FinanceError(Exception):
@@ -127,7 +128,11 @@ class FinanceStore:
                 old_entries = {x["id"]: x for x in old_data["transactions"]}
                 new_ids = {x.id for x in incoming.transactions}
                 removed = len(old_entries.keys() - new_ids)
-                if incoming.restored_backup or (old_entries and (not new_ids or removed > max(5, len(old_entries) * .25))):
+                # Reopening/re-pairing can repeat a restore flag without changing
+                # any ledger data. Only a different restored ledger needs review.
+                incoming_data = json.loads(payload)
+                identical_ledger = all(old_data[key] == incoming_data[key] for key in LEDGER_COLLECTIONS)
+                if (incoming.restored_backup and not identical_ledger) or (old_entries and (not new_ids or removed > max(5, len(old_entries) * .25))):
                     session.merge(FinanceReconciliation(source_id=SOURCE, payload=payload))
                     session.commit()
                     raise FinanceError("reconciliation_required", 409)
@@ -166,6 +171,11 @@ class FinanceStore:
             entry.update(currency=wallet["currency"], wallet=wallet["name"],
                          category=categories[entry["category_id"]]["name"],
                          subcategory=categories.get(entry["subcategory_id"], {}).get("name"))
+            # Cashew ordinary entries default to paid=true AND skipPaid=true.
+            # Its payment UI checks paid first; skipPaid only denotes a skipped
+            # occurrence for unpaid upcoming/subscription/repetitive entries.
+            entry["skipped"] = (entry["skipped"] and not entry["paid"] and
+                                entry["kind"] in ("upcoming", "subscription", "repetitive"))
             entry["classification"] = (
                 "transfer" if entry["paired_id"] else
                 "adjustment" if entry["category_id"] == "0" else
@@ -265,6 +275,8 @@ class FinanceStore:
         currencies = json.loads(json.dumps(currencies, default=lambda d: format(d, "f")))
         return {"revision": revision, "synced_at": synced_at, "start": start, "end_exclusive": end,
                 "timezone": "Asia/Shanghai", "as_of": today.isoformat(), "policy": POLICY,
+                "classification_version": 2,
+                "data_note": "普通已支付账单正常计入。Cashew 的 skipPaid 原始标志不等于用户跳过账单；不能据此推断用户做过批量操作。空汇总仅表示当前筛选无符合口径的记录，不代表账本为空。",
                 "currencies": currencies, "excluded": excluded, "matched_count": len(entries)}
 
     def catalogs(self):

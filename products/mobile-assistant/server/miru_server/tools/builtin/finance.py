@@ -41,7 +41,7 @@ class FinanceTool(Tool):
 class FinanceSummaryTool(FinanceTool):
     name = "finance_summary"
     method = "summary"
-    description = "查询用户 Cashew 个人账本实际收支、分类支出和每日趋势；不是 AI API 成本。省略日期为上海时区本周。按币种分别计算，回答说明口径和最后同步时间，不从记忆猜测。"
+    description = "查询用户 Cashew 个人账本实际收支、分类支出和每日趋势；不是 AI API 成本。省略日期为上海时区本周。每次使用最新结果，旧聊天中的空汇总或跳过数量可能已被修正，不能沿用。按币种分别计算，回答说明口径和最后同步时间。不能从状态标志推断用户做过批量操作，也不能把筛选为空说成整个账本为空。"
     parameters = {"type": "object", "properties": DATE_FILTERS}
 
 
@@ -68,7 +68,7 @@ class FinanceTransactionGetTool(FinanceTool):
 
 class FinanceSyncStatusTool(FinanceTool):
     name = "finance_sync_status"
-    description = "查询 Cashew 配对、最近成功同步时间、账单数量和待核对状态；未同步不能当作零收支。"
+    description = "查询 Cashew 配对、最近成功同步时间、账单数量和待核对状态；未同步不能当作零收支。存在 reconciliation 时说明最新上传待核对、查询仍使用上一版；不得声称实时最新或忽略同步时间变化。"
 
 
 FINANCE_TOOLS = [FinanceSummaryTool, FinanceTransactionsTool, FinanceTransactionGetTool, FinanceSyncStatusTool]

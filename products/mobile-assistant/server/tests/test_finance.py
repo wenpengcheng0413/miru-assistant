@@ -102,7 +102,8 @@ def test_exact_decimal_currency_and_special_types(finance):
     data = ledger()
     data["transactions"] += [entry("pay", "1000", income=True), entry("dollar", "-2", wallet_id="usd"),
         entry("move", "-100", paired_id="other"), entry("adjust", "500", category_id="0", income=True),
-        entry("loan", "-50", kind="credit"), entry("pending", "-20", paid=False), entry("skip", "-3", skipped=True)]
+        entry("loan", "-50", kind="credit"), entry("pending", "-20", paid=False),
+        entry("skip", "-3", kind="subscription", paid=False, skipped=True)]
     publish(store, token, data)
     result = store.summary(start="2020-10-12", end="2020-10-13")
     assert result["currencies"]["CNY"]["expense"] == "0.30"
@@ -111,6 +112,41 @@ def test_exact_decimal_currency_and_special_types(finance):
     assert result["excluded"] == {"transfer": 1, "adjustment": 1, "loan": 1, "pending": 1, "skipped": 1}
     assert store.summary(start="2020-10-11", end="2020-10-12")["matched_count"] == 0
     assert store.transactions(classification="pending")["total"] == 1
+
+
+def test_cashew_paid_skip_flag_is_not_a_skipped_transaction(finance):
+    store, token = finance
+    data = ledger()
+    data['transactions'] = [entry('ordinary', '-26.00', skipped=True),
+        entry('income', '140.00', income=True, skipped=True),
+        entry('paid-subscription', '-5.00', kind='subscription', skipped=True),
+        entry('pending', '-9.00', kind='upcoming', paid=False),
+        entry('skipped', '-12.00', kind='repetitive', paid=False, skipped=True)]
+    publish(store, token, data)
+    result = store.summary(start='2020-10-12', end='2020-10-13')
+    assert result['currencies']['CNY']['income'] == '140.00'
+    assert result['currencies']['CNY']['expense'] == '31.00'
+    assert result['excluded'] == {'pending': 1, 'skipped': 1}
+    assert store.transactions(classification='expense')['total'] == 2
+    assert store.transactions(classification='skipped')['total'] == 1
+    assert store.transaction('ordinary')['item']['skipped'] is False
+    # The uploaded source data is retained exactly; fixing views doesn't edit it.
+    assert store._read()[2]['transactions'][0]['skipped'] is True
+
+
+def test_identical_restore_does_not_block_next_sync_but_changed_restore_does(finance):
+    store, token = finance
+    publish(store, token, ledger())
+    same = ledger('same', 1)
+    same['restored_backup'] = True
+    assert publish(store, token, same)['revision'] == 2
+    assert store.status()['reconciliation'] is None
+    changed = ledger('changed', 2)
+    changed['restored_backup'] = True
+    changed['transactions'][0]['amount'] = '-100'
+    with pytest.raises(FinanceError, match='reconciliation_required'):
+        publish(store, token, changed)
+    assert store.status()['revision'] == 2
 
 
 def test_pagination_is_complete_and_rejects_changed_snapshot_and_filters(finance):

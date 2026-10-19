@@ -24,6 +24,8 @@ workflows:
       branch_patterns:
         - pattern: master
           include: true
+        - pattern: codex/cashew-finance-sync
+          include: true
       tag_patterns:
         - pattern: ios-v*
           include: true

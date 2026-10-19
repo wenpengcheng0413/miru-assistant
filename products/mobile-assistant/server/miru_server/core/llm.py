@@ -66,12 +66,14 @@ class TextDelta:
 @dataclass
 class ToolCallsDone:
     calls: list[ToolCallSpec]
+    reasoning_content: str = ""
 
 
 @dataclass
 class Done:
     usage: Usage
     finish_reason: str | None = None
+    reasoning_content: str = ""
 
 
 @dataclass
@@ -103,6 +105,7 @@ class LLMClient:
         model: str | None = None,
         max_tokens: int | None = None,
         tool_choice: str | dict | None = None,
+        thinking: bool | None = None,
     ) -> AsyncIterator[LLMEvent]:
         """流式对话。可能的事件：TextDelta* → (ToolCallsDone) → Done；失败时 StreamError。"""
         kwargs = {
@@ -119,9 +122,18 @@ class LLMClient:
             kwargs["tool_choice"] = tool_choice
         # DeepSeek V4 uses type=enabled/disabled. The older enabled=false
         # form triggers a 400 and deleting it re-enables hidden reasoning.
-        thinking_override = True
+        use_thinking = self.cfg.thinking if thinking is None else thinking
+        # Named/required tool choice is incompatible with DeepSeek thinking.
+        if isinstance(tool_choice, dict) or tool_choice == "required":
+            use_thinking = False
+        if use_thinking:
+            kwargs["messages"] = [
+                dict(m, reasoning_content=m.get("reasoning_content", ""))
+                if m.get("role") == "assistant" else m for m in messages
+            ]
+            kwargs["reasoning_effort"] = "high"
         kwargs["extra_body"] = {
-            "thinking": {"type": "enabled" if self.cfg.thinking else "disabled"}
+            "thinking": {"type": "enabled" if use_thinking else "disabled"}
         }
 
         last_error = "未知错误"
@@ -131,6 +143,7 @@ class LLMClient:
                 tool_calls = False
                 usage: Usage | None = None
                 finish_reason: str | None = None
+                reasoning_content = ""
                 async for ev in self._stream_once(kwargs):
                     if isinstance(ev, TextDelta):
                         visible = visible or bool(ev.text.strip())
@@ -141,27 +154,22 @@ class LLMClient:
                     elif isinstance(ev, Done):
                         usage = ev.usage
                         finish_reason = ev.finish_reason
+                        reasoning_content = ev.reasoning_content
                 # 某些网关在 thinking 参数被拒后仍只返回推理 token，
                 # 消耗满 max_tokens 却不给 content。扩大上限再试一次，
                 # 不能让客户端静默收到空回复。
                 if visible or tool_calls:
                     if usage is not None:
-                        yield Done(usage, finish_reason)
+                        yield Done(usage, finish_reason, reasoning_content)
                     return
                 if attempt < 2:
-                    kwargs["max_tokens"] = min(max(int(kwargs["max_tokens"]) * 2, 4096), self.cfg.max_tokens)
-                    kwargs.pop("extra_body", None)
+                    kwargs["max_tokens"] = min(max(int(kwargs["max_tokens"]) * 2, 4096), max(self.cfg.max_tokens, max_tokens or 0))
                     logger.warning("LLM 返回空可见内容，扩大输出上限后重试（max_tokens=%s）", kwargs["max_tokens"])
                     continue
                 yield StreamError("模型返回了空内容，请稍后重试（可能被思考 token 占满输出上限）")
                 return
             except BadRequestError as e:
-                # 老网关不认 thinking 参数 → 去掉重试一次
-                if thinking_override and "thinking" in str(e).lower():
-                    logger.warning("API 不接受 thinking 参数，去掉后重试")
-                    kwargs.pop("extra_body", None)
-                    thinking_override = False
-                    continue
+                # Never silently change the user's reasoning/cost preference.
                 last_error = f"{type(e).__name__}"
                 break  # 400 不重试
             except AuthenticationError as e:
@@ -186,6 +194,7 @@ class LLMClient:
         acc: dict[int, dict] = {}
         usage: Usage | None = None
         finish_reason: str | None = None
+        reasoning_parts: list[str] = []
 
         async for chunk in stream:
             if chunk.usage is not None:
@@ -202,6 +211,8 @@ class LLMClient:
             if choice.finish_reason:
                 finish_reason = choice.finish_reason
             delta = choice.delta
+            if getattr(delta, "reasoning_content", None):
+                reasoning_parts.append(delta.reasoning_content)
             if delta.content:
                 yield TextDelta(delta.content)
             for tc in delta.tool_calls or []:
@@ -214,7 +225,8 @@ class LLMClient:
                     if tc.function.arguments:
                         slot["arguments"] += tc.function.arguments
             if choice.finish_reason == "tool_calls":
-                yield ToolCallsDone(calls=[_parse_call(s) for s in acc.values()])
+                yield ToolCallsDone(calls=[_parse_call(s) for s in acc.values()],
+                                    reasoning_content="".join(reasoning_parts))
                 acc = {}
 
         # 用量兜底：估算（约 1 token ≈ 3.5 中文汉字 → 用 /3 保守）
@@ -225,7 +237,7 @@ class LLMClient:
                 completion_tokens=0,
                 estimated=True,
             )
-        yield Done(usage, finish_reason)
+        yield Done(usage, finish_reason, "".join(reasoning_parts))
 
 
     async def chat_json(self, system: str, user: str, temperature: float = 0.1) -> dict:
@@ -293,10 +305,11 @@ def tool_result_message(call: ToolCallSpec, result_json: str) -> dict:
     return {"role": "tool", "tool_call_id": call.id, "content": result_json}
 
 
-def assistant_toolcall_message(calls: list[ToolCallSpec]) -> dict:
+def assistant_toolcall_message(calls: list[ToolCallSpec], *, content="", reasoning_content="") -> dict:
     return {
         "role": "assistant",
-        "content": "",
+        "content": content,
+        "reasoning_content": reasoning_content,
         "tool_calls": [
             {
                 "id": c.id,

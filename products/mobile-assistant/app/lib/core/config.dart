@@ -12,6 +12,7 @@ class AppConfig {
   static const _kToken = 'miru_server_token';
   static const _kTtsEnabled = 'miru_tts_enabled';
   static const _kAutoSend = 'miru_auto_send';
+  static const _kThinkingLevel = 'miru_thinking_level';
   static const _kConversationId = 'miru_last_conversation_id';
   static const _kDeploymentProfile = 'miru_deployment_profile';
   static const _kDeviceId = 'miru_device_id';
@@ -29,8 +30,8 @@ class AppConfig {
   String baseUrl = buildBaseUrl.isNotEmpty
       ? buildBaseUrl
       : (parseDeploymentProfile(buildProfile).isCloud
-            ? ''
-            : defaultDevelopmentBaseUrl);
+          ? ''
+          : defaultDevelopmentBaseUrl);
   String token = '';
   String deviceId = '';
 
@@ -42,8 +43,9 @@ class AppConfig {
 
   /// 说完自动发送：关掉后语音识别文本会留在输入框，可修改后再手动发送
   bool autoSend = true;
+  String thinkingLevel = 'low';
 
-  /// 最近一次会话 ID：重连/重启时继续同一会话，聊天记录不丢
+  /// 当前会话 ID：仅本次运行重连使用。重新打开从新对话开始。
   String lastConversationId = '';
 
   /// http://host:port → ws://host:port/ws/session；https → wss
@@ -68,14 +70,16 @@ class AppConfig {
 
   /// hello 消息体（每次重连时按当前设置构建）
   Map<String, dynamic> get hello => {
-    'device': 'iphone',
-    'mode': 'voice',
-    'persona': 'miru',
-    'synth_tts': ttsEnabled,
-    'auto_run': autoSend,
-    if (deviceId.isNotEmpty) 'device_id': deviceId,
-    if (lastConversationId.isNotEmpty) 'conversation_id': lastConversationId,
-  };
+        'device': 'iphone',
+        'mode': 'voice',
+        'persona': 'miru',
+        'synth_tts': ttsEnabled,
+        'auto_run': autoSend,
+        'thinking_level': thinkingLevel,
+        if (deviceId.isNotEmpty) 'device_id': deviceId,
+        if (lastConversationId.isNotEmpty)
+          'conversation_id': lastConversationId,
+      };
 
   static Future<AppConfig> load() async {
     final config = AppConfig();
@@ -90,7 +94,8 @@ class AppConfig {
     await _secure.write(key: _kDeviceId, value: config.deviceId);
     config.ttsEnabled = prefs.getBool(_kTtsEnabled) ?? true;
     config.autoSend = prefs.getBool(_kAutoSend) ?? true;
-    config.lastConversationId = prefs.getString(_kConversationId) ?? '';
+    config.thinkingLevel =
+        prefs.getString(_kThinkingLevel) == 'high' ? 'high' : 'low';
     return config;
   }
 
@@ -101,7 +106,8 @@ class AppConfig {
     await _secure.write(key: _kToken, value: token);
     await prefs.setBool(_kTtsEnabled, ttsEnabled);
     await prefs.setBool(_kAutoSend, autoSend);
-    await prefs.setString(_kConversationId, lastConversationId);
+    await prefs.setString(_kThinkingLevel, thinkingLevel);
+    await prefs.remove(_kConversationId);
   }
 
   String? validateEndpoint() {

@@ -1,6 +1,6 @@
 """WS 会话入口：/ws/session（协议见 docs/02 §3）。
 
-上行：二进制帧 = 16kHz PCM16 语音；文本帧 = JSON 控制消息（hello/text_input/audio_end/interrupt/ping）
+上行：二进制帧 = 16kHz PCM16 语音；文本帧 = JSON 控制消息（hello/text_input/audio_end/audio_cancel/interrupt/ping）
 下行：JSON 事件 + TTS 音频二进制帧
 """
 from __future__ import annotations
@@ -167,6 +167,20 @@ class VoiceSession:
         # 一次按键 = 一轮对话（由上层启动 run 任务）
         await self._on_final_text(combined, attachment_ids or [])
 
+    async def on_audio_cancel(self) -> None:
+        """客户端放弃本次录音：关闸并清空缓冲，不做识别或发送。"""
+        if not self._recording:
+            return
+        self._recording = False
+        if self._recording_task and not self._recording_task.done():
+            self._recording_task.cancel()
+        self._recording_task = None
+        if self._partial_task and not self._partial_task.done():
+            self._partial_task.cancel()
+        self._partial_task = None
+        self._segments = []
+        self.vad = EnergyVAD(self.cfg.stt.vad)
+
     async def _finalize(self, pcm: bytes) -> None:
         """识别一个 VAD 片段，累积到当前按键会话；实时把累计文本发给客户端显示。"""
         if self._partial_task:
@@ -243,6 +257,7 @@ async def ws_session(websocket: WebSocket) -> None:
         persona_name=persona_name,
         persona=persona,
         mode=mode,
+        thinking_level=hello.get("thinking_level") if hello.get("thinking_level") in ("low", "high") else None,
         synth_tts=bool(hello.get("synth_tts", mode == "voice")),
         auto_run=bool(hello.get("auto_run", True)),
         tts_format=hello.get("tts_format", cfg.tts.format),
@@ -359,14 +374,20 @@ async def ws_session(websocket: WebSocket) -> None:
                 if ctx.turn_running:
                     await _safe_send(websocket, events.server_note("上一轮还没结束。"))
                     continue
+                if msg.get("thinking_level") in ("low", "high"):
+                    ctx.thinking_level = msg["thinking_level"]
                 start_run(text, attachment_ids)
             elif mtype == "audio_start":
+                if not ctx.turn_running and msg.get("thinking_level") in ("low", "high"):
+                    ctx.thinking_level = msg["thinking_level"]
                 voice.start_recording()
             elif mtype == "audio_end":
                 attachment_ids = msg.get("attachment_ids") or []
                 if not isinstance(attachment_ids, list):
                     attachment_ids = []
                 await voice.on_audio_end(attachment_ids)
+            elif mtype == "audio_cancel":
+                await voice.on_audio_cancel()
             elif mtype == "interrupt":
                 if run_task and not run_task.done():
                     run_task.cancel()

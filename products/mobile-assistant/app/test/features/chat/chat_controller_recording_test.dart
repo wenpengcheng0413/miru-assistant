@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miru_app/core/audio/player_service.dart';
 import 'package:miru_app/core/audio/recorder_service.dart';
@@ -8,6 +9,7 @@ import 'package:miru_app/core/config.dart';
 import 'package:miru_app/core/server_discovery.dart';
 import 'package:miru_app/core/ws_client.dart';
 import 'package:miru_app/features/chat/chat_controller.dart';
+import 'package:miru_app/features/chat/chat_screen.dart';
 
 void main() {
   testWidgets('松手早于录音启动完成时不会留下超时定时器', (tester) async {
@@ -42,19 +44,68 @@ void main() {
     await tester.pump();
 
     expect(
-      controller.lines
-          .where((line) => line.text == '录音超时，已自动停止')
-          .length,
+      controller.lines.where((line) => line.text == '录音超时，已自动停止').length,
       1,
     );
     expect(controller.phase, ChatPhase.thinking);
     await tester.pump(const Duration(seconds: 10));
     expect(
-      controller.lines
-          .where((line) => line.text == '录音超时，已自动停止')
-          .length,
+      controller.lines.where((line) => line.text == '录音超时，已自动停止').length,
       1,
     );
+    controller.dispose();
+  });
+
+  testWidgets('取消录音时不发送 audio_end 且清空识别草稿', (tester) async {
+    final recorder = _DelayedRecorder()..completeStart();
+    final ws = _FakeWsClient();
+    final controller = _controller(recorder, ws: ws);
+
+    await controller.startListening();
+    controller.partialText = '尚未完成的识别';
+    controller.pendingInput = '旧草稿';
+    final previousVersion = controller.pendingInputVersion;
+    await controller.cancelListening();
+
+    expect(controller.phase, ChatPhase.idle);
+    expect(controller.partialText, isEmpty);
+    expect(controller.pendingInput, isEmpty);
+    expect(controller.pendingInputVersion, previousVersion + 1);
+    expect(ws.jsonMessages, [
+      {'type': 'audio_start', 'thinking_level': 'low'},
+      {'type': 'audio_cancel'},
+    ]);
+    expect(recorder.stopCalls, 1);
+    controller.dispose();
+  });
+
+  testWidgets('按住说话上滑后松手会取消而不是发送', (tester) async {
+    final recorder = _DelayedRecorder()..completeStart();
+    final ws = _FakeWsClient();
+    final player = _FakePlayer();
+    final controller = _controller(recorder, ws: ws);
+    await tester.pumpWidget(
+      MaterialApp(home: ChatScreen(controller: controller, player: player)),
+    );
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.text('按住说话')),
+    );
+    await tester.pump();
+    expect(find.text('上滑取消 · 松开发送'), findsOneWidget);
+
+    await gesture.moveBy(const Offset(0, -70));
+    await tester.pump();
+    expect(find.text('松开取消 · 下滑继续'), findsOneWidget);
+
+    await gesture.up();
+    await tester.pump();
+    expect(ws.jsonMessages, [
+      {'type': 'audio_start', 'thinking_level': 'low'},
+      {'type': 'audio_cancel'},
+    ]);
+    expect(controller.phase, ChatPhase.idle);
+
     controller.dispose();
   });
 
@@ -103,9 +154,59 @@ void main() {
     expect(ws.jsonMessages.last, {
       'type': 'text_input',
       'text': '按月份分析收支',
+      'thinking_level': 'low',
       'attachment_ids': ['attachment-1'],
     });
     expect(controller.pendingAttachments, isEmpty);
+    controller.dispose();
+  });
+
+  testWidgets('历史会话从最新消息打开，向下按钮回到末尾', (tester) async {
+    final controller = _controller(_DelayedRecorder(), ws: _FakeWsClient());
+    for (var i = 0; i < 80; i++) { controller.lines.add(ChatLine('user', '消息 $i')); }
+    await tester.pumpWidget(MaterialApp(home: ChatScreen(controller: controller, player: _FakePlayer())));
+    await tester.pump();
+    expect(find.text('消息 79'), findsOneWidget);
+    final list = find.byType(ListView).first;
+    await tester.drag(list, const Offset(0, 600));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('回到最新消息'), findsOneWidget);
+    await tester.tap(find.byTooltip('回到最新消息'));
+    await tester.pumpAndSettle();
+    expect(find.text('消息 79'), findsOneWidget);
+    controller.dispose();
+  });
+
+  testWidgets('后台再打开空闲会话回到新对话，草稿附件不丢失', (tester) async {
+    final ws = _FakeWsClient();
+    final controller = _controller(_DelayedRecorder(), ws: ws);
+    controller.config.lastConversationId = 'old';
+    controller.lines.add(ChatLine('user', '旧消息'));
+    controller.onAppBackgrounded();
+    controller.onAppResumed();
+    await tester.pump();
+    expect(controller.lines, isEmpty);
+    expect(ws.hello.containsKey('conversation_id'), isFalse);
+    controller.lines.add(ChatLine('user', '新的消息'));
+    controller.pendingInput = '未发送的草稿';
+    controller.onAppBackgrounded();
+    controller.onAppResumed();
+    await tester.pump();
+    expect(controller.lines, hasLength(1));
+    expect(controller.pendingInput, '未发送的草稿');
+    controller.dispose();
+  });
+
+  testWidgets('高思考等级随文字和语音发送', (tester) async {
+    final ws = _FakeWsClient();
+    final controller = _controller(_DelayedRecorder()..completeStart(), ws: ws);
+    controller.config.thinkingLevel = 'high';
+    await controller.sendText('分析最近花销');
+    expect(ws.jsonMessages.last['thinking_level'], 'high');
+    controller.phase = ChatPhase.idle;
+    await controller.startListening();
+    expect(ws.jsonMessages.last, {'type': 'audio_start', 'thinking_level': 'high'});
+    await controller.cancelListening();
     controller.dispose();
   });
 }
@@ -116,11 +217,12 @@ ChatController _controller(
   WsClient? ws,
 }) {
   final config = AppConfig();
-  final client = ws ?? WsClient(
-    url: config.wsUri,
-    token: config.token,
-    hello: config.hello,
-  );
+  final client = ws ??
+      WsClient(
+        url: config.wsUri,
+        token: config.token,
+        hello: config.hello,
+      );
   return ChatController(
     config: config,
     ws: client,
@@ -154,6 +256,10 @@ class _FakeWsClient extends WsClient {
 
   @override
   Future<void> close() async {}
+  @override
+  Future<void> connect({Duration timeout = const Duration(seconds: 12)}) async {}
+  @override
+  Future<void> reconnect() async {}
 }
 
 class _DelayedRecorder implements RecorderService {

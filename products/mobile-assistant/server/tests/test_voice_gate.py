@@ -81,6 +81,18 @@ async def test_recording_window_transcribes():
     assert stt.calls == 1
 
 
+async def test_audio_cancel_discards_recording_without_transcription():
+    stt, voice = _make_session()
+    voice.start_recording()
+    await voice.on_audio(_sine_pcm(0.2))
+    await voice.on_audio_cancel()
+    await voice.on_audio_end()
+
+    assert voice._recording is False
+    assert voice._segments == []
+    assert stt.calls == 0
+
+
 async def test_watchdog_closes_window_and_discards():
     stt, voice = _make_session(timeout=0.2)
     pcm = _sine_pcm()

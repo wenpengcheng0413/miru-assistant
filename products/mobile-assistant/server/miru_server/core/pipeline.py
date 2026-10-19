@@ -22,6 +22,7 @@ from .llm import (
     StreamError,
     TextDelta,
     ToolCallsDone,
+    Usage,
     assistant_toolcall_message,
     tool_result_message,
 )
@@ -44,6 +45,7 @@ class SessionContext:
     persona_name: str
     persona: Persona
     mode: str = "text"                    # text | voice
+    thinking_level: str | None = None     # None preserves older client behavior
     synth_tts: bool = True                # 文本模式默认不合成（省 TTS 费用）
     auto_run: bool = True                 # voice 模式：识别后自动进管线；false=等客户端确认/修改后 text_input
     tts_format: str = "mp3"
@@ -137,6 +139,19 @@ class AgentPipeline:
 
         # 组装上下文（先读历史，再存本条用户消息，避免重复）
         system_prompt = await asyncio.to_thread(self._build_system_prompt, ctx)
+        if ctx.thinking_level == "high":
+            system_prompt += (
+                "\n[本轮思考等级：高] 充分分析用户的问题，提供详细、完整的回答，不设置固定字数目标。"
+                "先给结论，再解释具体依据、计算口径、关键变化、可能解释和可执行建议。"
+                "分析账本时先查最新数据，检查分页与同步时间，区分账单笔数和活动次数，"
+                "逐项核对金额及合计；未经证实的关联、消费动机和场次必须明确为推测。"
+                "内容以问题需要为准，不能用寒暄、反问或让用户自行补录代替已能完成的分析。"
+            )
+        elif ctx.thinking_level == "low":
+            system_prompt += (
+                "\n[本轮思考等级：低] 正常、清楚地回答，优先结论和必要依据，避免无关铺陈。"
+                "不强制长篇，也不省略关键事实；用户明确要求详细时仍完整解释。"
+            )
         history = await asyncio.to_thread(self._load_history, ctx.conversation_id)
         try:
             attachments = await asyncio.to_thread(
@@ -170,10 +185,17 @@ class AgentPipeline:
             {"role": "user", "content": user_content},
         ]
         schemas = self.services.tools.schemas() or None
-        long_context = bool(attachments) or len(str(user_content)) >= 12_000
-        # 附件/长上下文固定给到计划中的上限；短文本保持轻量预算。
+        long_context = bool(attachments) or len(str(user_content)) >= 12_000 or any(
+            word in user_text for word in ("分析", "详细", "仔细", "解释", "建议", "报告")
+        )
+        # 分析请求即使输入很短，也需要完整输出预算。
         long_max_tokens = min(cfg.llm.max_tokens, 384_000)
-        response_max_tokens = long_max_tokens if long_context else cfg.llm.short_max_tokens
+        if ctx.thinking_level == "high":
+            long_max_tokens = max(long_max_tokens, 65_536)
+            long_context = True
+        elif ctx.thinking_level == "low":
+            long_max_tokens = min(cfg.llm.short_max_tokens, long_max_tokens)
+        response_max_tokens = long_max_tokens if long_context else min(cfg.llm.short_max_tokens, long_max_tokens)
         analysis_detail = (
             f"上下文约 {len(str(user_content)):,} 字符，回复上限 {response_max_tokens} tokens"
         )
@@ -217,33 +239,49 @@ class AgentPipeline:
             analysis_step_sent = False
             generation_step_sent = False
             length_retry_done = False
-            for _round_no in range(cfg.llm.max_tool_rounds):
+            tool_rounds = 0
+            tool_context_chars = 0
+            final_note_sent = False
+            while True:
+                final_only = tool_rounds >= cfg.llm.max_tool_rounds or tool_context_chars >= 500_000
+                round_schemas = None if final_only else schemas
+                if final_only and not final_note_sent:
+                    final_note_sent = True
+                    messages.append({"role": "system", "content": (
+                        "本轮查询预算已用完，停止调用工具。请立即根据已经返回的数据完成实质性回答，"
+                        "不要仅输出准备查询的开场白。若还有未读分页，明确报告已读数量、剩余数量和区间，"
+                        "将结论限定为已读部分，不能声称完成全量分析。"
+                    )})
+                    await step("analysis", "正在汇总已读取内容", "达到本轮查询预算，保留已读数据并生成分析")
                 calls = []
+                round_parts: list[str] = []
+                round_reasoning = ""
                 length_limited = False
                 try:
                     stream = self.services.llm.stream_chat(
                         messages,
-                        schemas,
+                        round_schemas,
                         model=model_name,
                         max_tokens=response_max_tokens,
+                        thinking=(ctx.thinking_level == "high") if ctx.thinking_level else None,
                         tool_choice=(
                             {"type": "function", "function": {"name": "wechat_image_analysis"}}
-                            if force_image_tool and _round_no == 0
+                            if force_image_tool and tool_rounds == 0 and not final_only
                             else None
                         ),
                     )
                 except TypeError as e:
                     # 保持 FakeLLM/第三方适配器的旧接口兼容。
-                    if "max_tokens" not in str(e) and "tool_choice" not in str(e):
+                    if not any(k in str(e) for k in ("max_tokens", "tool_choice", "thinking")):
                         raise
                     try:
                         stream = self.services.llm.stream_chat(
-                            messages, schemas, model=model_name, max_tokens=response_max_tokens
+                            messages, round_schemas, model=model_name, max_tokens=response_max_tokens
                         )
                     except TypeError as second:
                         if "max_tokens" not in str(second):
                             raise
-                        stream = self.services.llm.stream_chat(messages, schemas, model=model_name)
+                        stream = self.services.llm.stream_chat(messages, round_schemas, model=model_name)
                 async for ev in stream:
                     if isinstance(ev, TextDelta):
                         await flush_steps()
@@ -254,6 +292,7 @@ class AgentPipeline:
                             await step("generation", "正在生成回复")
                             generation_step_sent = True
                         assistant_parts.append(ev.text)
+                        round_parts.append(ev.text)
                         await self._send(ctx, "json", events.llm_delta(ev.text))
                         if tts:
                             for sentence in splitter.feed(ev.text):
@@ -268,8 +307,19 @@ class AgentPipeline:
                             await step("generation", "正在生成回复")
                             generation_step_sent = True
                         calls = ev.calls
+                        round_reasoning = ev.reasoning_content
                     elif isinstance(ev, Done):
-                        usage = ev.usage
+                        round_reasoning = ev.reasoning_content or round_reasoning
+                        cost_rmb += await asyncio.to_thread(
+                            self.services.cost.record_llm, ctx.conversation_id, model_name, ev.usage
+                        )
+                        if usage is None:
+                            usage = Usage(0, 0)
+                        usage.prompt_tokens += ev.usage.prompt_tokens
+                        usage.completion_tokens += ev.usage.completion_tokens
+                        usage.cache_hit_tokens += ev.usage.cache_hit_tokens
+                        usage.cache_miss_tokens += ev.usage.cache_miss_tokens
+                        usage.estimated = usage.estimated or ev.usage.estimated
                         length_limited = ev.finish_reason == "length"
                     elif isinstance(ev, StreamError):
                         trace_status = "failed"
@@ -290,7 +340,7 @@ class AgentPipeline:
                         tts.enqueue(sentence)
 
                 if length_limited and not calls:
-                    if not length_retry_done and response_max_tokens < long_max_tokens:
+                    if not length_retry_done and (response_max_tokens < long_max_tokens or ctx.thinking_level == "high"):
                         # 把已生成正文作为上下文，请模型从截断处继续，避免重复整段回答。
                         length_retry_done = True
                         response_max_tokens = long_max_tokens
@@ -300,7 +350,7 @@ class AgentPipeline:
                             f"已达到当前输出上限，自动提高到 {response_max_tokens} tokens",
                         )
                         messages.extend([
-                            {"role": "assistant", "content": "".join(assistant_parts)},
+                            {"role": "assistant", "content": "".join(round_parts), "reasoning_content": round_reasoning},
                             {"role": "user", "content": "请从刚才中断的位置继续完成回复，不要重复已经输出的内容。"},
                         ])
                         continue
@@ -330,6 +380,14 @@ class AgentPipeline:
 
                 if not calls:
                     break  # 正常结束
+
+                if final_only:
+                    trace_status = "failed"
+                    await self._send(ctx, "json", events.error("tool_budget_exhausted", "查询预算已用完，模型未能生成汇总，请继续分析已读取内容。"))
+                    return
+                tool_rounds += 1
+                # 查询结果可能比用户输入长得多，后续分析统一使用完整输出预算。
+                response_max_tokens = long_max_tokens
 
                 # 执行工具并把结果回填
                 tool_msgs = []
@@ -372,12 +430,11 @@ class AgentPipeline:
                     )
                     tool_cls = self.services.tools.get(call.name)
                     max_chars = int(getattr(tool_cls, "max_result_chars", 8000)) if tool_cls else 8000
-                    tool_msgs.append(tool_result_message(call, result.to_llm(max_chars=max_chars)))
-                messages.append(assistant_toolcall_message(calls))
+                    tool_text = result.to_llm(max_chars=max_chars)
+                    tool_context_chars += len(tool_text)
+                    tool_msgs.append(tool_result_message(call, tool_text))
+                messages.append(assistant_toolcall_message(calls, content="".join(round_parts), reasoning_content=round_reasoning))
                 messages.extend(tool_msgs)
-            else:
-                # 工具循环耗尽（异常情况，模型一直在调工具）
-                await self._send(ctx, "json", events.server_note("本轮工具调用次数过多，已停止继续查询。"))
 
             # 落库 + 成本入账 + 收尾
             assistant_text = "".join(assistant_parts).strip()
@@ -394,11 +451,6 @@ class AgentPipeline:
             await asyncio.to_thread(
                 self._save_message, ctx.conversation_id, "assistant", assistant_text, turn_id
             )
-            if usage is not None:
-                cost_rmb = await asyncio.to_thread(
-                    self.services.cost.record_llm,
-                    ctx.conversation_id, model_name, usage,
-                )
             if ctx.mode == "voice" and getattr(self.services.stt, "is_local", True):
                 await asyncio.to_thread(
                     self.services.cost.record_local, "stt", self.services.stt.name, ctx.conversation_id

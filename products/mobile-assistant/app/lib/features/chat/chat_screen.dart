@@ -19,9 +19,17 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
+  static const double _voiceCancelDistance = 56;
+
   final TextEditingController _textCtrl = TextEditingController();
   final ImagePicker _imagePicker = ImagePicker();
+  final ScrollController _scroll = ScrollController();
+  bool _awayFromLatest = false;
+  bool _externalActivity = false;
+  int _conversationVersion = -1;
   bool _holding = false;
+  bool _cancelingVoice = false;
+  Offset? _voicePointerStart;
   int _syncedInputVersion = -1;
 
   ChatController get c => widget.controller;
@@ -30,12 +38,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _scroll.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _textCtrl.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -45,10 +55,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // 环境噪声会被 STT 幻觉成句号/英文单词自动发出去
     if (state != AppLifecycleState.resumed && c.phase == ChatPhase.listening) {
       _holding = false;
-      c.stopListening();
+      _cancelingVoice = false;
+      _voicePointerStart = null;
+      c.cancelListening();
     }
+    if (state == AppLifecycleState.paused) c.onAppBackgrounded();
     if (state == AppLifecycleState.resumed) {
-      c.onAppResumed();
+      c.onAppResumed(
+          preserveConversation: _externalActivity ||
+              _textCtrl.text.isNotEmpty ||
+              ModalRoute.of(context)?.isCurrent != true);
+    }
+  }
+
+  void _onScroll() {
+    final away = _scroll.hasClients && _scroll.offset > 120;
+    if (away != _awayFromLatest && mounted)
+      setState(() => _awayFromLatest = away);
+  }
+
+  void _scrollToLatest() {
+    if (_scroll.hasClients) {
+      _scroll.animateTo(0,
+          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
     }
   }
 
@@ -118,46 +147,82 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _pickImage(ImageSource source) async {
-    // 不限制宽高，且使用插件支持的最高质量；避免此前 92% 质量造成的细节损失。
-    final image = await _imagePicker.pickImage(
-      source: source,
-      imageQuality: 100,
-    );
-    if (image != null)
-      await c.uploadAttachment(image.path, filename: image.name);
+    _externalActivity = true;
+    try {
+      // 不限制宽高，且使用插件支持的最高质量；避免此前 92% 质量造成的细节损失。
+      final image = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 100,
+      );
+      if (image != null)
+        await c.uploadAttachment(image.path, filename: image.name);
+    } finally {
+      _externalActivity = false;
+    }
   }
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const [
-        'jpg',
-        'jpeg',
-        'png',
-        'gif',
-        'webp',
-        'pdf',
-        'docx',
-        'xlsx',
-        'xls',
-        'csv',
-        'pptx',
-        'txt',
-        'md',
-      ],
-    );
-    final file =
-        (result != null && result.files.isNotEmpty) ? result.files.first : null;
-    if (file?.path != null)
-      await c.uploadAttachment(file!.path!, filename: file.name);
+    _externalActivity = true;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const [
+          'jpg',
+          'jpeg',
+          'png',
+          'gif',
+          'webp',
+          'pdf',
+          'docx',
+          'xlsx',
+          'xls',
+          'csv',
+          'pptx',
+          'txt',
+          'md',
+        ],
+      );
+      final file = (result != null && result.files.isNotEmpty)
+          ? result.files.first
+          : null;
+      if (file?.path != null)
+        await c.uploadAttachment(file!.path!, filename: file.name);
+    } finally {
+      _externalActivity = false;
+    }
   }
 
-  /// 手指抬起/被系统取消：结束录音（幂等，重复调用无害）
+  /// 手指抬起：上滑超过阈值则放弃，否则结束并提交录音。
   void _finishHold() {
     if (!_holding) return;
+    final shouldCancel = _cancelingVoice;
     _holding = false;
+    _cancelingVoice = false;
+    _voicePointerStart = null;
     HapticFeedback.lightImpact();
-    c.stopListening();
+    if (shouldCancel) {
+      c.cancelListening();
+    } else {
+      c.stopListening();
+    }
+  }
+
+  /// 系统抢占手势时必须放弃录音，不能把不完整语音误提交。
+  void _cancelHold() {
+    if (!_holding) return;
+    _holding = false;
+    _cancelingVoice = false;
+    _voicePointerStart = null;
+    c.cancelListening();
+  }
+
+  void _updateVoiceDrag(PointerMoveEvent event) {
+    if (!_holding || _voicePointerStart == null) return;
+    final next =
+        event.position.dy <= _voicePointerStart!.dy - _voiceCancelDistance;
+    if (next == _cancelingVoice) return;
+    setState(() => _cancelingVoice = next);
+    if (next) HapticFeedback.selectionClick();
   }
 
   @override
@@ -195,28 +260,56 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         animation: c,
         builder: (context, _) {
           _syncPendingInput();
+          if (_conversationVersion != c.conversationVersion) {
+            _conversationVersion = c.conversationVersion;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
+            });
+          }
           return Column(
             children: [
               if (!c.wsConnected) _offlineBanner(context),
               if (c.wsConnected && c.systemStatus != null)
                 _systemStatusBanner(context),
               Expanded(
-                // 点聊天区域收键盘；拖动列表滚动也收键盘
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: () => FocusScope.of(context).unfocus(),
-                  child: ListView.builder(
-                    keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                    itemCount: c.lines.length + 1,
-                    itemBuilder: (context, i) {
-                      if (i == c.lines.length) return _liveArea();
-                      final line = c.lines[i];
-                      return _messageBubble(line);
-                    },
+                child: Stack(children: [
+                  Positioned.fill(
+                    // 点聊天区域收键盘；拖动列表滚动也收键盘
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: () => FocusScope.of(context).unfocus(),
+                      child: ListView.builder(
+                        controller: _scroll,
+                        reverse: true,
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                        itemCount: c.lines.length + 1,
+                        itemBuilder: (context, i) {
+                          if (i == 0) return _liveArea();
+                          final line = c.lines[c.lines.length - i];
+                          return _messageBubble(line);
+                        },
+                      ),
+                    ),
                   ),
-                ),
+                  if (_awayFromLatest)
+                    Positioned(
+                        right: 16,
+                        bottom: 12,
+                        child: FloatingActionButton.small(
+                          heroTag: 'latest-message',
+                          tooltip: '回到最新消息',
+                          onPressed: _scrollToLatest,
+                          child: const Icon(Icons.arrow_downward),
+                        )),
+                  if (c.lines.isEmpty &&
+                      c.miruText.isEmpty &&
+                      c.phase == ChatPhase.idle)
+                    const Center(
+                        child:
+                            Text('新对话\n今天想聊些什么？', textAlign: TextAlign.center)),
+                ]),
               ),
               _bottomBar(context),
             ],
@@ -646,6 +739,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Row(children: [
+              const Text('思考等级'),
+              const SizedBox(width: 12),
+              ChoiceChip(
+                  label: const Text('低'),
+                  selected: c.config.thinkingLevel == 'low',
+                  tooltip: '正常回答，节省消耗',
+                  onSelected:
+                      listening ? null : (_) => c.setThinkingLevel('low')),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                  label: const Text('高'),
+                  selected: c.config.thinkingLevel == 'high',
+                  tooltip: '深入思考，详细分析',
+                  onSelected:
+                      listening ? null : (_) => c.setThinkingLevel('high')),
+              const Spacer(),
+              IconButton(
+                  tooltip: '新对话',
+                  onPressed: listening ? null : c.createConversation,
+                  icon: const Icon(Icons.edit_square)),
+            ]),
             if (c.pendingAttachments.isNotEmpty || c.attachmentUploading)
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
@@ -746,21 +861,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     onPressed: c.interrupt,
                   ),
                 Expanded(
-                  // 原始指针事件（不用 GestureDetector 长按）：
-                  // 按下立即开录、抬起/取消立即停止，状态和真实录音严格同步
+                  // 原始指针事件（不用 GestureDetector 长按）：按下立即开录，
+                  // 上滑进入取消区；系统取消手势时直接丢弃，避免误提交残音。
                   child: Listener(
                     behavior: HitTestBehavior.opaque,
-                    onPointerDown: (_) {
+                    onPointerDown: (event) {
                       _holding = true;
+                      _cancelingVoice = false;
+                      _voicePointerStart = event.position;
                       HapticFeedback.mediumImpact();
                       c.startListening();
                     },
+                    onPointerMove: _updateVoiceDrag,
                     onPointerUp: (_) => _finishHold(),
-                    onPointerCancel: (_) => _finishHold(),
+                    onPointerCancel: (_) => _cancelHold(),
                     child: Container(
                       height: 48,
                       decoration: BoxDecoration(
-                        color: listening
+                        color: listening || _cancelingVoice
                             ? Theme.of(context).colorScheme.errorContainer
                             : Theme.of(context).colorScheme.primary,
                         borderRadius: BorderRadius.circular(24),
@@ -768,10 +886,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       child: Center(
                         child: Text(
                           listening
-                              ? (c.recordRemaining > 0 &&
-                                      c.recordRemaining <= 10
-                                  ? '松开结束 · 还剩 ${c.recordRemaining}s'
-                                  : '松开结束 · 录音中')
+                              ? (_cancelingVoice
+                                  ? '松开取消 · 下滑继续'
+                                  : (c.recordRemaining > 0 &&
+                                          c.recordRemaining <= 10
+                                      ? '上滑取消 · 还剩 ${c.recordRemaining}s'
+                                      : '上滑取消 · 松开发送'))
                               : '按住说话',
                           style: const TextStyle(
                             fontSize: 16,

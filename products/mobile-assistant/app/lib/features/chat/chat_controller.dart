@@ -232,6 +232,8 @@ class ChatController extends ChangeNotifier {
   bool _everConnected = false;
   bool _discoveryActive = false;
   bool _disposed = false;
+  bool _wasBackgrounded = false;
+  int conversationVersion = 0;
   int _recordingGeneration = 0;
   DateTime? _recordStartedAt;
 
@@ -341,8 +343,23 @@ class ChatController extends ChangeNotifier {
 
   /// iOS can suspend timers and sockets in the background. Recheck as soon as
   /// the app returns to the foreground instead of waiting for backoff.
-  void onAppResumed() {
+  void onAppBackgrounded() => _wasBackgrounded = true;
+
+  void onAppResumed({bool preserveConversation = false}) {
     if (_disposed) return;
+    final openFresh = _wasBackgrounded &&
+        !preserveConversation &&
+        phase == ChatPhase.idle &&
+        activeTurnId.isEmpty &&
+        !attachmentUploading &&
+        pendingAttachments.isEmpty &&
+        pendingInput.isEmpty &&
+        lines.isNotEmpty;
+    _wasBackgrounded = false;
+    if (openFresh) {
+      unawaited(openNewConversation());
+      return;
+    }
     if (wsConnected) {
       ws.sendJson({'type': 'ping'});
       return;
@@ -357,6 +374,7 @@ class ChatController extends ChangeNotifier {
   void _onSession(String id) {
     if (id.isEmpty || config.lastConversationId == id) return;
     config.lastConversationId = id;
+    ws.hello = config.hello;
     config.save(); // 异步落盘，不阻塞会话
   }
 
@@ -366,6 +384,7 @@ class ChatController extends ChangeNotifier {
     if (_historyLoaded) return;
     _historyLoaded = true;
     final conversationId = ws.sessionId;
+    final version = conversationVersion;
     if (conversationId == null || conversationId.isEmpty) return;
 
     try {
@@ -380,6 +399,7 @@ class ChatController extends ChangeNotifier {
         options: Options(headers: {'Authorization': 'Bearer ${config.token}'}),
       );
       final rows = (resp.data as List?) ?? const [];
+      if (_disposed || version != conversationVersion) return;
       final history = <ChatLine>[];
       for (final row in rows) {
         if (row is! Map) continue;
@@ -445,6 +465,7 @@ class ChatController extends ChangeNotifier {
       if (history.isEmpty) return;
 
       // 如果加载期间用户已经说话，保留这些新行并去重，避免历史消息被插到最下面
+      if (_disposed || version != conversationVersion) return;
       final live = lines.toList();
       lines.clear();
       for (final h in history) {
@@ -455,6 +476,7 @@ class ChatController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       // 历史记录加载失败不影响当前会话
+      if (version == conversationVersion) _historyLoaded = false;
     }
   }
 
@@ -497,35 +519,45 @@ class ChatController extends ChangeNotifier {
   }
 
   Future<void> createConversation() async {
-    if (!wsConnected) {
-      lines.add(ChatLine('note', '未连接服务器，暂时无法新建会话'));
-      notifyListeners();
-      return;
-    }
-    try {
-      final response = await _api().post(
-        '${config.restBaseUrl}/api/conversations',
-        data: {'persona': 'miru'},
-      );
-      final id = (response.data as Map?)?['id'] as String? ?? '';
-      if (id.isEmpty) throw StateError('服务器没有返回会话 ID');
-      await selectConversation(id);
-    } catch (_) {
-      lines.add(ChatLine('note', '新建会话失败，请稍后重试'));
-      notifyListeners();
-    }
+    await openNewConversation();
+  }
+
+  Future<void> openNewConversation() async {
+    if (phase == ChatPhase.listening) await cancelListening();
+    await player.interrupt();
+    config.lastConversationId = '';
+    conversationVersion++;
+    _historyLoaded = false;
+    lines.clear();
+    partialText = miruText = toolStatus = progressStatus = pendingInput = '';
+    pendingInputVersion++;
+    pendingAttachments.clear();
+    _voiceAttachmentIdsInFlight.clear();
+    _resetActiveTurn();
+    phase = ChatPhase.idle;
+    wsConnected = false;
+    wsStatus = '正在连接新对话…';
+    ws.updateTarget(
+        url: config.wsUri, token: config.token, hello: config.hello);
+    notifyListeners();
+    await ws.reconnect();
   }
 
   Future<void> selectConversation(String conversationId) async {
     if (conversationId.isEmpty || conversationId == config.lastConversationId)
       return;
     if (!wsConnected) return;
-    if (phase == ChatPhase.listening ||
-        phase == ChatPhase.thinking ||
+    if (phase == ChatPhase.listening) await cancelListening();
+    if (phase == ChatPhase.thinking ||
         phase == ChatPhase.speaking) {
       await interrupt();
     }
     config.lastConversationId = conversationId;
+    conversationVersion++;
+    pendingInput = '';
+    pendingInputVersion++;
+    pendingAttachments.clear();
+    _voiceAttachmentIdsInFlight.clear();
     await config.save();
     _historyLoaded = false;
     lines.clear();
@@ -826,7 +858,8 @@ class ChatController extends ChangeNotifier {
     phase = ChatPhase.listening;
     recordRemaining = recordingLimitSeconds;
     notifyListeners();
-    ws.sendAudioStart();
+    ws.sendJson(
+        {'type': 'audio_start', 'thinking_level': config.thinkingLevel});
     try {
       await recorder.start(onChunk: ws.sendAudio);
     } catch (e) {
@@ -891,6 +924,22 @@ class ChatController extends ChangeNotifier {
 
   Future<void> stopListening() => _stopListening();
 
+  /// 放弃本次按住说话：立即关掉本地录音和服务端音频闸门，
+  /// 不触发 STT、自动发送或附件消费。
+  Future<void> cancelListening() async {
+    if (phase != ChatPhase.listening) return;
+    _invalidateRecording();
+    phase = ChatPhase.idle;
+    partialText = '';
+    if (pendingInput.isNotEmpty) {
+      pendingInput = '';
+      pendingInputVersion++;
+    }
+    ws.sendJson({'type': 'audio_cancel'});
+    notifyListeners();
+    await recorder.stop();
+  }
+
   Future<void> _stopListening({bool timedOut = false}) async {
     if (phase != ChatPhase.listening) return;
     _invalidateRecording();
@@ -944,6 +993,7 @@ class ChatController extends ChangeNotifier {
     ws.sendJson({
       'type': 'text_input',
       'text': value,
+      'thinking_level': config.thinkingLevel,
       if (attachmentIds.isNotEmpty) 'attachment_ids': attachmentIds,
     });
     phase = ChatPhase.thinking;
@@ -960,6 +1010,14 @@ class ChatController extends ChangeNotifier {
     _resetActiveTurn();
     phase = ChatPhase.idle;
     notifyListeners();
+  }
+
+  Future<void> setThinkingLevel(String value) async {
+    if (value != 'low' && value != 'high') return;
+    config.thinkingLevel = value;
+    ws.hello = config.hello;
+    notifyListeners();
+    await config.save();
   }
 
   /// 切换语音回复开关（重连以新参数握手）

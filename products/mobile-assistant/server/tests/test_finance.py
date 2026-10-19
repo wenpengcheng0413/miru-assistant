@@ -60,6 +60,18 @@ def test_pairing_expiry_single_use_rotation_and_revoke(finance):
         store.redeem(expired)
 
 
+def test_search_totals_cover_all_pages_and_exclude_pending(finance):
+    store, token = finance
+    data = ledger()
+    data['transactions'].append(entry('pending', '-99', paid=False))
+    publish(store, token, data)
+    first = store.transactions(query='午饭', limit=1)
+    second = store.transactions(query='午饭', limit=1, cursor=first['next_cursor'])
+    assert first['total'] == 3
+    assert first['actual_totals'] == second['actual_totals'] == {
+        'CNY': {'income': '0', 'expense': '0.30', 'count': 2}}
+
+
 def test_snapshot_idempotence_modifications_deletions_and_stale_upload(finance):
     store, token = finance
     first = ledger()

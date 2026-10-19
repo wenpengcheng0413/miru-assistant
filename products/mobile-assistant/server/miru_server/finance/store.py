@@ -230,9 +230,21 @@ class FinanceStore:
             except Exception:
                 raise FinanceError("invalid_cursor") from None
         following = offset + limit
+        totals = {}
+        today = datetime.now(SHANGHAI).date().isoformat()
+        for entry in rows:
+            kind = entry['classification']
+            if kind not in ('income', 'expense') or entry['local_date'] > today:
+                continue
+            group = totals.setdefault(entry['currency'], {'income': Decimal(0), 'expense': Decimal(0), 'count': 0})
+            group[kind] += abs(Decimal(entry['amount']))
+            group['count'] += 1
+        totals = {currency: {k: str(v) if isinstance(v, Decimal) else v for k, v in group.items()}
+                  for currency, group in totals.items()}
         next_cursor = base64.urlsafe_b64encode(canonical({"revision": revision, "filter": filter_hash,
                    "offset": following}).encode()).decode() if following < len(rows) else None
         return {"revision": revision, "synced_at": synced_at, "total": len(rows),
+                "actual_totals": totals, "totals_scope": "全部匹配记录，与分页无关；" + POLICY,
                 "items": rows[offset:following], "next_cursor": next_cursor}
 
     def transaction(self, entry_id):

@@ -38,11 +38,19 @@ class _Bootstrap extends StatefulWidget {
 
 class _BootstrapState extends State<_Bootstrap> {
   late final Future<AppConfig> _configFuture;
+  ChatController? _controller;
+  PlayerService? _player;
 
   @override
   void initState() {
     super.initState();
     _configFuture = AppConfig.load();
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
   }
 
   @override
@@ -55,9 +63,9 @@ class _BootstrapState extends State<_Bootstrap> {
               body: Center(child: CircularProgressIndicator()));
         }
         final config = snapshot.data!;
-        final player = PlayerService();
-        return ChatScreen(
-            controller: _buildController(config, player), player: player);
+        final player = _player ??= PlayerService();
+        final controller = _controller ??= _buildController(config, player);
+        return ChatScreen(controller: controller, player: player);
       },
     );
   }

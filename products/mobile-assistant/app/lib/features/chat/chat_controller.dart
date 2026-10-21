@@ -232,7 +232,6 @@ class ChatController extends ChangeNotifier {
   bool _everConnected = false;
   bool _discoveryActive = false;
   bool _disposed = false;
-  bool _wasBackgrounded = false;
   int conversationVersion = 0;
   int _recordingGeneration = 0;
   DateTime? _recordStartedAt;
@@ -343,23 +342,10 @@ class ChatController extends ChangeNotifier {
 
   /// iOS can suspend timers and sockets in the background. Recheck as soon as
   /// the app returns to the foreground instead of waiting for backoff.
-  void onAppBackgrounded() => _wasBackgrounded = true;
-
-  void onAppResumed({bool preserveConversation = false}) {
+  void onAppResumed() {
     if (_disposed) return;
-    final openFresh = _wasBackgrounded &&
-        !preserveConversation &&
-        phase == ChatPhase.idle &&
-        activeTurnId.isEmpty &&
-        !attachmentUploading &&
-        pendingAttachments.isEmpty &&
-        pendingInput.isEmpty &&
-        lines.isNotEmpty;
-    _wasBackgrounded = false;
-    if (openFresh) {
-      unawaited(openNewConversation());
-      return;
-    }
+    // Resuming the same process keeps its conversation, draft and scroll position.
+    // AppConfig.load() starts a new conversation only on a cold launch.
     if (wsConnected) {
       ws.sendJson({'type': 'ping'});
       return;
@@ -548,8 +534,7 @@ class ChatController extends ChangeNotifier {
       return;
     if (!wsConnected) return;
     if (phase == ChatPhase.listening) await cancelListening();
-    if (phase == ChatPhase.thinking ||
-        phase == ChatPhase.speaking) {
+    if (phase == ChatPhase.thinking || phase == ChatPhase.speaking) {
       await interrupt();
     }
     config.lastConversationId = conversationId;

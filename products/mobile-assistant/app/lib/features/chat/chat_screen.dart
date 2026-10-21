@@ -25,7 +25,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final ImagePicker _imagePicker = ImagePicker();
   final ScrollController _scroll = ScrollController();
   bool _awayFromLatest = false;
-  bool _externalActivity = false;
   int _conversationVersion = -1;
   bool _holding = false;
   bool _cancelingVoice = false;
@@ -59,13 +58,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _voicePointerStart = null;
       c.cancelListening();
     }
-    if (state == AppLifecycleState.paused) c.onAppBackgrounded();
-    if (state == AppLifecycleState.resumed) {
-      c.onAppResumed(
-          preserveConversation: _externalActivity ||
-              _textCtrl.text.isNotEmpty ||
-              ModalRoute.of(context)?.isCurrent != true);
-    }
+    if (state == AppLifecycleState.resumed) c.onAppResumed();
   }
 
   void _onScroll() {
@@ -147,49 +140,38 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _pickImage(ImageSource source) async {
-    _externalActivity = true;
-    try {
-      // 不限制宽高，且使用插件支持的最高质量；避免此前 92% 质量造成的细节损失。
-      final image = await _imagePicker.pickImage(
-        source: source,
-        imageQuality: 100,
-      );
-      if (image != null)
-        await c.uploadAttachment(image.path, filename: image.name);
-    } finally {
-      _externalActivity = false;
-    }
+    // 不限制宽高，且使用插件支持的最高质量；避免此前 92% 质量造成的细节损失。
+    final image = await _imagePicker.pickImage(
+      source: source,
+      imageQuality: 100,
+    );
+    if (image != null)
+      await c.uploadAttachment(image.path, filename: image.name);
   }
 
   Future<void> _pickFile() async {
-    _externalActivity = true;
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const [
-          'jpg',
-          'jpeg',
-          'png',
-          'gif',
-          'webp',
-          'pdf',
-          'docx',
-          'xlsx',
-          'xls',
-          'csv',
-          'pptx',
-          'txt',
-          'md',
-        ],
-      );
-      final file = (result != null && result.files.isNotEmpty)
-          ? result.files.first
-          : null;
-      if (file?.path != null)
-        await c.uploadAttachment(file!.path!, filename: file.name);
-    } finally {
-      _externalActivity = false;
-    }
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const [
+        'jpg',
+        'jpeg',
+        'png',
+        'gif',
+        'webp',
+        'pdf',
+        'docx',
+        'xlsx',
+        'xls',
+        'csv',
+        'pptx',
+        'txt',
+        'md',
+      ],
+    );
+    final file =
+        (result != null && result.files.isNotEmpty) ? result.files.first : null;
+    if (file?.path != null)
+      await c.uploadAttachment(file!.path!, filename: file.name);
   }
 
   /// 手指抬起：上滑超过阈值则放弃，否则结束并提交录音。

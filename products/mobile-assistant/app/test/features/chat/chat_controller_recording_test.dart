@@ -163,8 +163,11 @@ void main() {
 
   testWidgets('历史会话从最新消息打开，向下按钮回到末尾', (tester) async {
     final controller = _controller(_DelayedRecorder(), ws: _FakeWsClient());
-    for (var i = 0; i < 80; i++) { controller.lines.add(ChatLine('user', '消息 $i')); }
-    await tester.pumpWidget(MaterialApp(home: ChatScreen(controller: controller, player: _FakePlayer())));
+    for (var i = 0; i < 80; i++) {
+      controller.lines.add(ChatLine('user', '消息 $i'));
+    }
+    await tester.pumpWidget(MaterialApp(
+        home: ChatScreen(controller: controller, player: _FakePlayer())));
     await tester.pump();
     expect(find.text('消息 79'), findsOneWidget);
     final list = find.byType(ListView).first;
@@ -177,22 +180,51 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('后台再打开空闲会话回到新对话，草稿附件不丢失', (tester) async {
+  testWidgets('系统后台切换保留会话和滚动位置', (tester) async {
+    final controller = _controller(_DelayedRecorder(), ws: _FakeWsClient());
+    controller.config.lastConversationId = 'existing';
+    for (var i = 0; i < 80; i++) {
+      controller.lines.add(ChatLine('user', '消息 $i'));
+    }
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpWidget(MaterialApp(
+      home: ChatScreen(controller: controller, player: _FakePlayer()),
+    ));
+    await tester.pump();
+    await tester.drag(find.byType(ListView).first, const Offset(0, 600));
+    await tester.pumpAndSettle();
+    final position = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+    final offset = position.pixels;
+    expect(offset, greaterThan(0));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(controller.config.lastConversationId, 'existing');
+    expect(controller.lines, hasLength(80));
+    expect(position.pixels, offset);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('后台再打开保留当前会话，草稿附件不丢失', (tester) async {
     final ws = _FakeWsClient();
     final controller = _controller(_DelayedRecorder(), ws: ws);
     controller.config.lastConversationId = 'old';
     controller.lines.add(ChatLine('user', '旧消息'));
-    controller.onAppBackgrounded();
     controller.onAppResumed();
     await tester.pump();
-    expect(controller.lines, isEmpty);
-    expect(ws.hello.containsKey('conversation_id'), isFalse);
+    expect(controller.lines.single.text, '旧消息');
+    expect(controller.config.lastConversationId, 'old');
     controller.lines.add(ChatLine('user', '新的消息'));
     controller.pendingInput = '未发送的草稿';
-    controller.onAppBackgrounded();
     controller.onAppResumed();
     await tester.pump();
-    expect(controller.lines, hasLength(1));
+    expect(controller.lines, hasLength(2));
     expect(controller.pendingInput, '未发送的草稿');
     controller.dispose();
   });
@@ -205,7 +237,8 @@ void main() {
     expect(ws.jsonMessages.last['thinking_level'], 'high');
     controller.phase = ChatPhase.idle;
     await controller.startListening();
-    expect(ws.jsonMessages.last, {'type': 'audio_start', 'thinking_level': 'high'});
+    expect(ws.jsonMessages.last,
+        {'type': 'audio_start', 'thinking_level': 'high'});
     await controller.cancelListening();
     controller.dispose();
   });
@@ -257,7 +290,8 @@ class _FakeWsClient extends WsClient {
   @override
   Future<void> close() async {}
   @override
-  Future<void> connect({Duration timeout = const Duration(seconds: 12)}) async {}
+  Future<void> connect(
+      {Duration timeout = const Duration(seconds: 12)}) async {}
   @override
   Future<void> reconnect() async {}
 }

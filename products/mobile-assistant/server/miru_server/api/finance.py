@@ -3,9 +3,11 @@ import asyncio
 import hashlib
 import hmac
 import re
+import zlib
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
+from starlette.requests import ClientDisconnect
 
 from ..finance.schema import Snapshot
 from ..finance.store import FinanceError, FinanceStore
@@ -29,11 +31,33 @@ async def call(fn, *args, **kwargs):
 
 async def limited_body(request, limit=MAX_BYTES):
     body = bytearray()
-    async for chunk in request.stream():
-        body.extend(chunk)
-        if len(body) > limit:
-            raise HTTPException(413, detail={"code": "snapshot_too_large"})
+    try:
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > limit:
+                raise HTTPException(413, detail={"code": "snapshot_too_large"})
+    except ClientDisconnect:
+        raise HTTPException(400, detail={"code": "upload_interrupted"}) from None
     return bytes(body)
+
+
+def decode_snapshot_body(body, encoding, limit=MAX_BYTES):
+    if encoding in ("", "identity"):
+        return body
+    if encoding != "gzip":
+        raise HTTPException(415, detail={"code": "unsupported_content_encoding"})
+    # Bound decompressed memory as well as wire bytes. Reject truncated streams
+    # and extra members rather than publishing a partially decoded snapshot.
+    try:
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        decoded = decoder.decompress(body, limit + 1)
+        if len(decoded) > limit or decoder.unconsumed_tail:
+            raise HTTPException(413, detail={"code": "snapshot_too_large"})
+        if not decoder.eof or decoder.unused_data:
+            raise zlib.error("incomplete or trailing gzip data")
+        return decoded
+    except zlib.error:
+        raise HTTPException(400, detail={"code": "invalid_compression"}) from None
 
 
 async def upload_token(request):
@@ -70,13 +94,16 @@ async def pair(request: Request):
 @sync_router.get("/status")
 async def sync_status(request: Request):
     await upload_token(request)
-    return await call(store(request).status)
+    return {**await call(store(request).status), "snapshot_encodings": ["identity", "gzip"]}
 
 
 @sync_router.post("/snapshot")
 async def snapshot(request: Request):
     token = await upload_token(request)
     body = await limited_body(request)
+    body = await asyncio.to_thread(
+        decode_snapshot_body, body, request.headers.get("Content-Encoding", "").lower()
+    )
     checksum = request.headers.get("X-Content-SHA256", "")
     if not re.fullmatch(r"[0-9a-f]{64}", checksum) or not hmac.compare_digest(hashlib.sha256(body).hexdigest(), checksum):
         raise HTTPException(400, detail={"code": "checksum_mismatch"})

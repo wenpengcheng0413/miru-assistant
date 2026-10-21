@@ -1,10 +1,27 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:miru_app/core/audio/player_service.dart';
 import 'package:miru_app/core/config.dart';
 import 'package:miru_app/core/deployment_profile.dart';
 import 'package:miru_app/core/system_status.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('cold launch starts a new conversation while in-process config keeps the current one', () async {
+    SharedPreferences.setMockInitialValues({'miru_last_conversation_id': 'old'});
+    FlutterSecureStorage.setMockInitialValues({'miru_device_id': 'test-device'});
+    final first = await AppConfig.load();
+    expect(first.lastConversationId, isEmpty);
+    first.lastConversationId = 'current';
+    await first.save();
+    expect(first.hello['conversation_id'], 'current');
+    final restarted = await AppConfig.load();
+    expect(restarted.hello.containsKey('conversation_id'), isFalse);
+    expect(restarted.deviceId, first.deviceId);
+  });
+
   test('TTS byte source declares the production MP3 MIME type', () {
     expect(ttsAudioMimeType, 'audio/mpeg');
   });

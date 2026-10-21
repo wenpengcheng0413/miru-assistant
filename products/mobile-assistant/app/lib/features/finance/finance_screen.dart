@@ -32,7 +32,7 @@ class _FinanceScreenState extends State<FinanceScreen> with WidgetsBindingObserv
     super.initState();
     _api = widget.api ?? FinanceApi(widget.config);
     WidgetsBinding.instance.addObserver(this);
-    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _checkForUpdates());
+    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) => _checkForUpdates());
     _reload();
   }
 
@@ -221,7 +221,7 @@ class _FinanceScreenState extends State<FinanceScreen> with WidgetsBindingObserv
         if (_error.isNotEmpty) Card(child: Padding(padding: const EdgeInsets.all(16), child: Text(_error))),
         if (_status != null) Text(_status!['synced_at'] == null ? '尚未同步' :
           '数据更新于 ${DateTime.tryParse(_status!['synced_at'] as String)?.toLocal().toString().split('.').first ?? _status!['synced_at']} · ${_status!['transaction_count']} 笔'),
-        const Text('Cashew 联网并在前台时自动上传；切回这里会检查更新，账本打开时每 10 秒检查一次。'),
+        const Text('Cashew 联网并在前台时自动上传；切回这里会检查更新，账本打开时每 3 秒检查一次。'),
         if (_status?['paired'] == false) const Text('上传权限已撤销，目前显示上一次同步的数据。'),
         if (pending != null) Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('需要核对：当前 ${_status?['transaction_count']} 笔，新账本 ${pending['transaction_count']} 笔。可能来自删除或恢复备份。'),

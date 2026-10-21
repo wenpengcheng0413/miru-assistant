@@ -1,4 +1,5 @@
 import copy
+import gzip
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -225,6 +226,54 @@ def test_no_sync_is_not_zero(finance):
     assert store.status()["transaction_count"] is None
     with pytest.raises(FinanceError, match="not_synced"):
         store.summary()
+
+
+def test_compressed_upload_roundtrip_and_invalid_uploads_keep_previous_ledger(app_config):
+    with TestClient(create_app(app_config)) as client:
+        admin = {"Authorization": "Bearer " + app_config.server.token}
+        code = client.post("/api/finance/pairing", headers=admin).json()["code"]
+        token = client.post("/api/finance/sync/pair", json={"code": code}).json()["token"]
+        headers = {"Authorization": "Bearer " + token, "Content-Encoding": "gzip"}
+        status = client.get("/api/finance/sync/status", headers=headers).json()
+        assert "gzip" in status["snapshot_encodings"]
+        body = json.dumps(ledger(), ensure_ascii=False).encode()
+        headers["X-Content-SHA256"] = hashlib.sha256(body).hexdigest()
+        compressed = gzip.compress(body)
+        response = client.post("/api/finance/sync/snapshot", content=compressed, headers=headers)
+        assert response.status_code == 200, response.text
+        assert client.post("/api/finance/sync/snapshot", content=compressed, headers=headers).json()["duplicate"]
+        assert client.get("/api/finance/transactions", headers=admin).json()["total"] == 2
+        for broken in (compressed[:-3], b"not gzip", compressed + b"trailing"):
+            result = client.post("/api/finance/sync/snapshot", content=broken, headers=headers)
+            assert result.status_code == 400
+            assert result.json()["detail"]["code"] == "invalid_compression"
+        headers["X-Content-SHA256"] = "0" * 64
+        assert client.post("/api/finance/sync/snapshot", content=compressed, headers=headers).status_code == 400
+        headers["Content-Encoding"] = "br"
+        assert client.post("/api/finance/sync/snapshot", content=compressed, headers=headers).status_code == 415
+        assert client.get("/api/finance/status", headers=admin).json()["revision"] == 1
+
+
+def test_gzip_decompression_is_bounded():
+    from fastapi import HTTPException
+    from miru_server.api.finance import decode_snapshot_body
+    with pytest.raises(HTTPException) as exc:
+        decode_snapshot_body(gzip.compress(b"x" * 100000), "gzip", limit=1024)
+    assert exc.value.status_code == 413
+    assert decode_snapshot_body(gzip.compress(b"x" * 1024), "gzip", limit=1024) == b"x" * 1024
+
+
+async def test_interrupted_upload_does_not_raise_unhandled_server_error():
+    from fastapi import HTTPException
+    from starlette.requests import Request
+    from miru_server.api.finance import limited_body
+    events = iter([{"type": "http.request", "body": b"partial", "more_body": True},
+                   {"type": "http.disconnect"}])
+    async def receive():
+        return next(events)
+    with pytest.raises(HTTPException) as exc:
+        await limited_body(Request({"type": "http"}, receive))
+    assert exc.value.detail["code"] == "upload_interrupted"
 
 
 def test_concurrent_publish_accepts_one_revision_only(finance):

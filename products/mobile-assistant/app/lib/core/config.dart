@@ -101,9 +101,10 @@ class AppConfig {
 
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
+    // Do not persist a new endpoint if the secure credential write is rejected.
+    await _secure.write(key: _kToken, value: token);
     await prefs.setString(_kBaseUrl, baseUrl);
     await prefs.setString(_kDeploymentProfile, profile.value);
-    await _secure.write(key: _kToken, value: token);
     await prefs.setBool(_kTtsEnabled, ttsEnabled);
     await prefs.setBool(_kAutoSend, autoSend);
     await prefs.setString(_kThinkingLevel, thinkingLevel);

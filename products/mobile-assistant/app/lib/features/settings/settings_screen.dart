@@ -6,15 +6,18 @@ import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../core/config.dart';
+import '../../core/design/miru_theme.dart';
+import '../../core/design/miru_widgets.dart';
 import '../../core/deployment_profile.dart';
 import '../../core/server_discovery.dart';
 import '../../core/system_status.dart';
 
 /// 设置页：服务器配置 / 连接测试 / 成本 / 记忆（REST 管理面）。
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.config});
+  const SettingsScreen({super.key, required this.config, this.saveConfig});
 
   final AppConfig config;
+  final Future<void> Function(AppConfig)? saveConfig;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -27,15 +30,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _saving = false;
   bool _discovering = false;
   bool _syncingWechat = false;
+  bool _testing = false;
+  bool _connectionExpanded = false;
+  bool _memoryExpanded = false;
+  bool _costExpanded = false;
+  late bool _ttsEnabled;
+  late bool _autoSend;
+  bool get _needsSetup =>
+      widget.config.token.trim().isEmpty ||
+      widget.config.validateEndpoint() != null;
+
   String _testResult = '';
   String _wechatStatus = '';
 
-  Dio get _dio => Dio(
-        BaseOptions(
-          connectTimeout: const Duration(seconds: 12),
-          receiveTimeout: const Duration(seconds: 12),
-        ),
-      );
+  final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 12),
+      receiveTimeout: const Duration(seconds: 12),
+    ),
+  );
 
   /// 去尾部斜杠：`http://x:8765/` → `http://x:8765`，避免拼出 //api/health
   String get _cleanUrl => _urlCtrl.text.trim().replaceAll(RegExp(r'/+$'), '');
@@ -50,214 +63,355 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _urlCtrl = TextEditingController(text: widget.config.baseUrl);
     _tokenCtrl = TextEditingController(text: widget.config.token);
     _profile = widget.config.profile;
+    _ttsEnabled = widget.config.ttsEnabled;
+    _autoSend = widget.config.autoSend;
+    _connectionExpanded = _needsSetup;
   }
 
   @override
   void dispose() {
     _urlCtrl.dispose();
     _tokenCtrl.dispose();
+    _dio.close(force: true);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final connectionCard = Card(
+        child: ExpansionTile(
+      key: const ValueKey('connection-settings'),
+      initiallyExpanded: _connectionExpanded,
+      leading: const Icon(Icons.dns_outlined),
+      title: const Text('服务连接'),
+      subtitle: Text(_profile.label),
+      onExpansionChanged: (value) =>
+          setState(() => _connectionExpanded = value),
+      childrenPadding: const EdgeInsets.all(MiruSpacing.md),
+      children: _connectionExpanded
+          ? [
+              DropdownButtonFormField<DeploymentProfile>(
+                initialValue: _profile,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: '连接模式',
+                ),
+                items: DeploymentProfile.values
+                    .map(
+                      (item) => DropdownMenuItem(
+                          value: item, child: Text(item.label)),
+                    )
+                    .toList(),
+                onChanged: _saving || _testing || _discovering || _syncingWechat
+                    ? null
+                    : (value) {
+                        if (value == null) return;
+                        setState(() {
+                          _profile = value;
+                          _testResult = '';
+                          _wechatStatus = '';
+                        });
+                      },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _urlCtrl,
+                enabled:
+                    !_saving && !_testing && !_discovering && !_syncingWechat,
+                decoration: InputDecoration(
+                  labelText: _profile.isCloud ? 'Cloud 地址（HTTPS）' : '开发服务器地址',
+                  hintText: _profile.isCloud
+                      ? 'https://设备名.tailnet.ts.net'
+                      : 'http://127.0.0.1:8765',
+                ),
+                keyboardType: TextInputType.url,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _tokenCtrl,
+                enabled:
+                    !_saving && !_testing && !_discovering && !_syncingWechat,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: const InputDecoration(
+                  labelText: '访问令牌（Bearer token）',
+                ),
+                obscureText: true,
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed:
+                        _testing || _saving || _discovering || _syncingWechat
+                            ? null
+                            : _testConnection,
+                    icon: const Icon(Icons.wifi_tethering),
+                    label: Text(_testing ? '测试中…' : '测试连接'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              if (_profile.allowsBonjour)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _discovering || _testing || _saving
+                        ? null
+                        : _discoverComputer,
+                    icon: _discovering
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.radar),
+                    label: Text(_discovering ? '正在查找电脑…' : '自动查找开发电脑'),
+                  ),
+                ),
+              if (_testResult.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child:
+                      Text(_testResult, style: const TextStyle(fontSize: 13)),
+                ),
+              if (_wechatStatus.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(_wechatStatus, style: const TextStyle(fontSize: 12)),
+                if (_profile.allowsBonjour)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _syncingWechat ? null : _syncWechat,
+                      icon: _syncingWechat
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.sync),
+                      label: Text(_syncingWechat ? '正在同步微信数据…' : '同步微信数据'),
+                    ),
+                  ),
+              ],
+            ]
+          : const [],
+    ));
     return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      appBar: AppBar(title: const Text('设置'), actions: [
+        TextButton(
+            onPressed: _saving || _testing || _discovering || _syncingWechat
+                ? null
+                : _save,
+            child: Text(_saving ? '保存中…' : '保存')),
+        const SizedBox(width: 8),
+      ]),
+      body: MiruPageBody(
+          child: ListView(
+        padding: const EdgeInsets.all(MiruSpacing.page),
         children: [
-          DropdownButtonFormField<DeploymentProfile>(
-            initialValue: _profile,
-            decoration: const InputDecoration(
-              labelText: '连接模式',
-              border: OutlineInputBorder(),
-            ),
-            items: DeploymentProfile.values
-                .map(
-                  (item) =>
-                      DropdownMenuItem(value: item, child: Text(item.label)),
-                )
-                .toList(),
-            onChanged: (value) {
-              if (value == null) return;
-              setState(() {
-                _profile = value;
-                _testResult = '';
-                _wechatStatus = '';
-              });
-            },
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _urlCtrl,
-            decoration: InputDecoration(
-              labelText: _profile.isCloud ? 'Cloud 地址（HTTPS）' : '开发服务器地址',
-              hintText: _profile.isCloud
-                  ? 'https://设备名.tailnet.ts.net'
-                  : 'http://127.0.0.1:8765',
-              border: OutlineInputBorder(),
-            ),
-            keyboardType: TextInputType.url,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _tokenCtrl,
-            decoration: const InputDecoration(
-              labelText: '访问令牌（Bearer token）',
-              border: OutlineInputBorder(),
-            ),
-            obscureText: true,
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _saving ? null : _save,
-                  icon: const Icon(Icons.save_outlined),
-                  label: const Text('保存'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _testConnection,
-                  icon: const Icon(Icons.wifi_tethering),
-                  label: const Text('测试连接'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          if (_profile.allowsBonjour)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: _discovering ? null : _discoverComputer,
-                icon: _discovering
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.radar),
-                label: Text(_discovering ? '正在查找电脑…' : '自动查找开发电脑'),
-              ),
-            ),
-          if (_testResult.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(_testResult, style: const TextStyle(fontSize: 13)),
-            ),
-          if (_wechatStatus.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(_wechatStatus, style: const TextStyle(fontSize: 12)),
-            if (_profile.allowsBonjour)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: _syncingWechat ? null : _syncWechat,
-                  icon: _syncingWechat
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.sync),
-                  label: Text(_syncingWechat ? '正在同步微信数据…' : '同步微信数据'),
-                ),
-              ),
+          Text('让 Miru 更懂你的习惯',
+              style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: 8),
+          const Text('调整对话体验、管理记忆，或检查服务连接。'),
+          const SizedBox(height: MiruSpacing.lg),
+          if (_needsSetup) ...[
+            connectionCard,
+            const SizedBox(height: MiruSpacing.lg)
           ],
-          const Divider(height: 32),
-          SwitchListTile(
-            title: const Text('语音回复'),
-            subtitle: Text(
-              widget.config.ttsEnabled ? 'Miru 会用语音回答' : '只显示文字，不播放语音',
-            ),
-            value: widget.config.ttsEnabled,
-            onChanged: (v) => setState(() => widget.config.ttsEnabled = v),
-          ),
-          SwitchListTile(
-            title: const Text('说完自动发送'),
-            subtitle: Text(
-              widget.config.autoSend ? '语音识别后直接发送' : '识别文本留在输入框，可修改后再发送',
-            ),
-            value: widget.config.autoSend,
-            onChanged: (v) => setState(() => widget.config.autoSend = v),
-          ),
-          const Divider(height: 32),
-          Text('成本报表（近 7 天）', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          // key 绑定当前地址：保存后自动用新地址重新加载
-          _CostPanel(
-            key: ValueKey('cost-$_cleanUrl'),
-            headers: _headers,
-            baseUrl: _cleanUrl,
-          ),
-          const Divider(height: 32),
-          Text('长期记忆（profile）', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          _MemoryPanel(
-            key: ValueKey('memory-$_cleanUrl'),
-            headers: _headers,
-            baseUrl: _cleanUrl,
-          ),
+          MiruSection(
+              title: '日常偏好',
+              subtitle: '修改后点右上角保存，返回对话后生效。',
+              child: Column(children: [
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('语音回复'),
+                  subtitle: Text(_ttsEnabled ? 'Miru 会用语音回答' : '只显示文字，不播放语音'),
+                  value: _ttsEnabled,
+                  onChanged:
+                      _saving ? null : (v) => setState(() => _ttsEnabled = v),
+                ),
+                const Divider(height: 20),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('说完自动发送'),
+                  subtitle: Text(_autoSend ? '语音识别后直接发送' : '识别文本留在输入框，可修改后再发送'),
+                  value: _autoSend,
+                  onChanged:
+                      _saving ? null : (v) => setState(() => _autoSend = v),
+                ),
+              ])),
+          MiruSection(
+              title: '外观',
+              subtitle: '立即生效，自动记住你的选择。',
+              child: ValueListenableBuilder<ThemeMode>(
+                valueListenable: MiruThemeController.instance.mode,
+                builder: (context, mode, _) =>
+                    DropdownButtonFormField<ThemeMode>(
+                  key: ValueKey(mode),
+                  initialValue: mode,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: '主题'),
+                  items: const [
+                    DropdownMenuItem(
+                        value: ThemeMode.system, child: Text('跟随系统')),
+                    DropdownMenuItem(value: ThemeMode.light, child: Text('浅色')),
+                    DropdownMenuItem(value: ThemeMode.dark, child: Text('深色')),
+                  ],
+                  onChanged: (value) async {
+                    if (value == null) return;
+                    try {
+                      await MiruThemeController.instance.setMode(value);
+                    } catch (_) {
+                      if (context.mounted)
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('外观保存失败，请重试')));
+                    }
+                  },
+                ),
+              )),
+          if (!_needsSetup) connectionCard,
+          const SizedBox(height: 12),
+          Card(
+              child: ExpansionTile(
+            leading: const Icon(Icons.psychology_outlined),
+            title: const Text('长期记忆'),
+            subtitle: const Text('个人画像、偏好、项目与知识'),
+            onExpansionChanged: (value) =>
+                setState(() => _memoryExpanded = value),
+            childrenPadding: const EdgeInsets.all(MiruSpacing.md),
+            children: _memoryExpanded
+                ? [
+                    _MemoryPanel(
+                      key: ValueKey('memory-${widget.config.restBaseUrl}'),
+                      headers: {
+                        'Authorization': 'Bearer ${widget.config.token}'
+                      },
+                      baseUrl: widget.config.restBaseUrl,
+                    )
+                  ]
+                : const [],
+          )),
+          const SizedBox(height: 12),
+          Card(
+              child: ExpansionTile(
+            leading: const Icon(Icons.receipt_long_outlined),
+            title: const Text('使用成本'),
+            subtitle: const Text('查看近 7 天的服务费用'),
+            onExpansionChanged: (value) =>
+                setState(() => _costExpanded = value),
+            childrenPadding: const EdgeInsets.all(MiruSpacing.md),
+            children: _costExpanded
+                ? [
+                    _CostPanel(
+                      key: ValueKey('cost-${widget.config.restBaseUrl}'),
+                      headers: {
+                        'Authorization': 'Bearer ${widget.config.token}'
+                      },
+                      baseUrl: widget.config.restBaseUrl,
+                    )
+                  ]
+                : const [],
+          )),
+          const SizedBox(height: MiruSpacing.lg),
+          ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.code),
+              title: const Text('开源许可'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () =>
+                  showLicensePage(context: context, applicationName: 'Miru')),
+          const SizedBox(height: MiruSpacing.lg),
         ],
-      ),
+      )),
     );
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     final error = _validateInput();
     if (error != null) {
-      setState(() => _testResult = '❌ $error');
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
       return;
     }
     setState(() => _saving = true);
-    widget.config.profile = _profile;
-    widget.config.baseUrl = _cleanUrl;
-    widget.config.token = _tokenCtrl.text.trim();
-    await widget.config.save();
-    if (mounted) {
-      setState(() => _saving = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已保存')));
-      Navigator.pop(context, true); // 通知聊天页配置已变更（含开关）
+    final draft = AppConfig()
+      ..profile = _profile
+      ..baseUrl = _cleanUrl
+      ..token = _tokenCtrl.text.trim()
+      ..ttsEnabled = _ttsEnabled
+      ..autoSend = _autoSend
+      ..thinkingLevel = widget.config.thinkingLevel
+      ..deviceId = widget.config.deviceId
+      ..lastConversationId = widget.config.lastConversationId;
+    try {
+      await (widget.saveConfig?.call(draft) ?? draft.save());
+      widget.config
+        ..profile = draft.profile
+        ..baseUrl = draft.baseUrl
+        ..token = draft.token
+        ..ttsEnabled = draft.ttsEnabled
+        ..autoSend = draft.autoSend;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已保存')));
+      Navigator.pop(context, true);
+    } catch (_) {
+      // Best-effort rollback of a partially completed local persistence write.
+      // The live shared configuration has not been mutated at this point.
+      try {
+        await widget.config.save();
+      } catch (_) {}
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('保存失败，请重试。当前连接未更改。')));
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _testConnection() async {
+    if (_testing) return;
     final cleanUrl = _cleanUrl;
     final validationError = _validateInput();
     if (validationError != null) {
-      setState(() => _testResult = '❌ $validationError');
+      setState(() => _testResult = '$validationError');
       return;
     }
 
-    setState(() => _testResult = '测试中…');
+    setState(() {
+      _testing = true;
+      _testResult = '测试中…';
+    });
     try {
       final resp = await _dio.get(
         '$cleanUrl/api/status',
         options: Options(headers: _headers),
       );
       // REST 通了还要验证 WS 握手（聊天功能走 WS），防止只通一半
-      await _probeWs(cleanUrl);
+      if (!mounted) return;
+      await _probeWs(cleanUrl, _tokenCtrl.text.trim());
       final status = MiruSystemStatus.fromJson(resp.data as Map);
+      if (!mounted) return;
       setState(() {
         _testResult = _profile.isCloud
-            ? '✅ 连接成功（HTTPS REST + WSS）'
-            : '✅ 连接成功（REST + WebSocket）';
+            ? '连接成功（HTTPS REST + WSS）'
+            : '连接成功（REST + WebSocket）';
         _wechatStatus = _formatSystemStatus(status);
       });
     } catch (e) {
-      setState(() => _testResult = '❌ ${friendlyNetError(e)}');
+      if (mounted) setState(() => _testResult = '${friendlyNetError(e)}');
+    } finally {
+      if (mounted) setState(() => _testing = false);
     }
   }
 
   Future<void> _discoverComputer() async {
     if (!_profile.allowsBonjour) {
-      setState(() => _testResult = '❌ 生产模式已禁用局域网自动发现');
+      setState(() => _testResult = '生产模式已禁用局域网自动发现');
       return;
     }
     setState(() {
@@ -269,7 +423,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (found == null) {
       setState(() {
         _discovering = false;
-        _testResult = '❌ 没有发现电脑：请确认电脑端 Miru 已启动，且 iOS 已允许“本地网络”权限';
+        _testResult = '没有发现电脑：请确认电脑端 Miru 已启动，且 iOS 已允许“本地网络”权限';
       });
       return;
     }
@@ -341,18 +495,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _wechatStatus = _formatWechatStatus(
           Map<String, dynamic>.from(resp.data as Map),
         );
-        _testResult = '✅ 微信离线快照同步完成';
+        _testResult = '微信离线快照同步完成';
       });
     } catch (e) {
       if (mounted)
-        setState(() => _testResult = '❌ 微信同步失败：${friendlyNetError(e)}');
+        setState(() => _testResult = '微信同步失败：${friendlyNetError(e)}');
     } finally {
       if (mounted) setState(() => _syncingWechat = false);
     }
   }
 
   /// 探测 /ws/session：完成 hello 握手收到 hello_ok 才算真的能用。
-  Future<void> _probeWs(String cleanUrl) async {
+  Future<void> _probeWs(String cleanUrl, String token) async {
     final base = Uri.parse(cleanUrl);
     final wsUri = base.replace(
       scheme: base.scheme == 'https' ? 'wss' : 'ws',
@@ -373,7 +527,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       channel.sink.add(
         jsonEncode({
           'type': 'hello',
-          'token': _tokenCtrl.text.trim(),
+          'token': token,
           'device': 'iphone',
           'mode': 'text',
         }),
@@ -443,6 +597,16 @@ class _CostPanel extends StatefulWidget {
 
 class _CostPanelState extends State<_CostPanel> {
   String _text = '加载中…';
+  bool _loading = false;
+  final _dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: const Duration(seconds: 12)));
+
+  @override
+  void dispose() {
+    _dio.close(force: true);
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -451,25 +615,24 @@ class _CostPanelState extends State<_CostPanel> {
   }
 
   Future<void> _load() async {
+    if (_loading) return;
+    _loading = true;
     try {
-      final dio = Dio(
-        BaseOptions(
-          connectTimeout: const Duration(seconds: 8),
-          receiveTimeout: const Duration(seconds: 12),
-        ),
-      );
-      final resp = await dio.get(
+      final resp = await _dio.get(
         '${widget.baseUrl}/api/cost/report?days=7',
         options: Options(headers: widget.headers),
       );
       final data = resp.data as Map<String, dynamic>;
       final by = (data['by_provider'] as Map?) ?? {};
+      if (!mounted) return;
       setState(() {
         _text = '近 7 天合计 ¥${data['total_rmb']} · '
             '${by.entries.map((e) => '${e.key}: ¥${e.value}').join('，')}';
       });
     } catch (e) {
-      setState(() => _text = '加载失败：${friendlyNetError(e)}');
+      if (mounted) setState(() => _text = '加载失败：${friendlyNetError(e)}');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -483,7 +646,8 @@ class _CostPanelState extends State<_CostPanel> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(_text, style: const TextStyle(fontSize: 13)),
-          TextButton(onPressed: _reload, child: const Text('重新加载')),
+          TextButton(
+              onPressed: _loading ? null : _reload, child: const Text('重新加载')),
         ],
       );
 }
@@ -511,14 +675,15 @@ class _MemoryPanelState extends State<_MemoryPanel> {
   List<_MemoryEntry> _entries = const [];
   bool _loading = true;
   String _error = '';
+  int _generation = 0;
 
-  Dio get _api => Dio(
-        BaseOptions(
-          connectTimeout: const Duration(seconds: 8),
-          receiveTimeout: const Duration(seconds: 12),
-          headers: widget.headers,
-        ),
-      );
+  late final Dio _api = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: const Duration(seconds: 12),
+      headers: widget.headers,
+    ),
+  );
 
   @override
   void initState() {
@@ -526,7 +691,15 @@ class _MemoryPanelState extends State<_MemoryPanel> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _api.close(force: true);
+    super.dispose();
+  }
+
   Future<void> _load() async {
+    final generation = ++_generation;
+    final scope = _scope;
     setState(() {
       _loading = true;
       _error = '';
@@ -534,19 +707,19 @@ class _MemoryPanelState extends State<_MemoryPanel> {
     try {
       final resp = await _api.get(
         '${widget.baseUrl}/api/memory',
-        queryParameters: {'scope': _scope},
+        queryParameters: {'scope': scope},
       );
       final rows = (resp.data['entries'] as List?) ?? const [];
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       setState(() {
         _entries = rows
             .whereType<Map>()
-            .map((row) => _MemoryEntry.fromJson(_scope, row))
+            .map((row) => _MemoryEntry.fromJson(scope, row))
             .toList();
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       setState(() {
         _loading = false;
         _error = '加载失败：${friendlyNetError(e)}';
@@ -608,24 +781,25 @@ class _MemoryPanelState extends State<_MemoryPanel> {
         ],
       ),
     );
-    if (save != true || value.text.trim().isEmpty) return;
+    final newValue = value.text.trim();
+    final newNotes = notes.text.trim();
+    value.dispose();
+    notes.dispose();
+    if (save != true || newValue.isEmpty || !mounted) return;
     try {
       await _api.put(
         _entryUrl(entry),
         data: {
-          'value': value.text.trim(),
-          if (entry.scope == 'projects') 'notes': notes.text.trim(),
+          'value': newValue,
+          if (entry.scope == 'projects') 'notes': newNotes,
         },
       );
-      await _load();
+      if (mounted) await _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('保存失败：${friendlyNetError(e)}')),
       );
-    } finally {
-      value.dispose();
-      notes.dispose();
     }
   }
 
@@ -647,10 +821,10 @@ class _MemoryPanelState extends State<_MemoryPanel> {
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
     try {
       await _api.delete(_entryUrl(entry));
-      await _load();
+      if (mounted) await _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -702,7 +876,10 @@ class _MemoryPanelState extends State<_MemoryPanel> {
             Text(_error,
                 style: TextStyle(color: Theme.of(context).colorScheme.error))
           else if (_entries.isEmpty)
-            const Text('（空）')
+            const MiruEmptyState(
+                icon: Icons.psychology_outlined,
+                title: '还没有这类记忆',
+                description: 'Miru 会在与你的交流中逐渐记住有用的信息。')
           else
             ..._entries.map(
               (entry) => Card(

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'core/audio/player_service.dart';
 import 'core/audio/recorder_service.dart';
 import 'core/config.dart';
+import 'core/design/miru_theme.dart';
+import 'core/design/miru_widgets.dart';
 import 'core/server_discovery.dart';
 import 'core/ws_client.dart';
 import 'features/chat/chat_controller.dart';
@@ -13,17 +15,20 @@ class MiruApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Miru',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF7C6FF0),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: MiruThemeController.instance.mode,
+      builder: (context, mode, _) => MaterialApp(
+        title: 'Miru',
+        debugShowCheckedModeBanner: false,
+        theme: MiruTheme.light,
+        darkTheme: MiruTheme.dark,
+        themeMode: mode,
+        themeAnimationDuration:
+            MediaQuery.maybeOf(context)?.disableAnimations == true
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
+        home: const _Bootstrap(),
       ),
-      home: const _Bootstrap(),
     );
   }
 }
@@ -37,7 +42,7 @@ class _Bootstrap extends StatefulWidget {
 }
 
 class _BootstrapState extends State<_Bootstrap> {
-  late final Future<AppConfig> _configFuture;
+  late Future<AppConfig> _configFuture;
   ChatController? _controller;
   PlayerService? _player;
 
@@ -58,6 +63,19 @@ class _BootstrapState extends State<_Bootstrap> {
     return FutureBuilder<AppConfig>(
       future: _configFuture,
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Scaffold(
+              body: Center(
+                  child: MiruEmptyState(
+            icon: Icons.lock_outline,
+            title: '暂时无法读取配置',
+            description: '请稍后重试，已保存的数据会继续保留。',
+            action: FilledButton(
+                onPressed: () =>
+                    setState(() => _configFuture = AppConfig.load()),
+                child: const Text('重试')),
+          )));
+        }
         if (!snapshot.hasData) {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));

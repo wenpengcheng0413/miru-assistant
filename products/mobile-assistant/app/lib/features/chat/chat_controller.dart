@@ -207,6 +207,11 @@ class ChatController extends ChangeNotifier {
   bool attachmentUploading = false;
   bool conversationsLoading = false;
   String conversationsError = '';
+  int _conversationSearchGeneration = 0;
+  String _conversationQuery = '';
+  String get conversationQuery => _conversationQuery;
+  bool historyLoading = false;
+  String historyError = '';
 
   /// 最新识别文本（填入输入框供修改）；版本号用于 UI 侧同步
   String pendingInput = '';
@@ -372,6 +377,9 @@ class ChatController extends ChangeNotifier {
     final conversationId = ws.sessionId;
     final version = conversationVersion;
     if (conversationId == null || conversationId.isEmpty) return;
+    historyLoading = true;
+    historyError = '';
+    notifyListeners();
 
     try {
       final dio = Dio(
@@ -462,8 +470,22 @@ class ChatController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       // 历史记录加载失败不影响当前会话
-      if (version == conversationVersion) _historyLoaded = false;
+      if (!_disposed && version == conversationVersion) {
+        _historyLoaded = false;
+        historyError = '历史消息暂时无法加载';
+      }
+    } finally {
+      if (!_disposed && version == conversationVersion) {
+        historyLoading = false;
+        notifyListeners();
+      }
     }
+  }
+
+  Future<void> retryHistory() async {
+    if (historyLoading) return;
+    _historyLoaded = false;
+    await _loadHistory();
   }
 
   Dio _api() => Dio(
@@ -474,8 +496,10 @@ class ChatController extends ChangeNotifier {
         ),
       );
 
-  Future<void> loadConversations({String query = ''}) async {
-    if (conversationsLoading) return;
+  Future<void> loadConversations({String? query}) async {
+    if (_disposed) return;
+    if (query != null) _conversationQuery = query.trim();
+    final generation = ++_conversationSearchGeneration;
     conversationsLoading = true;
     conversationsError = '';
     notifyListeners();
@@ -484,9 +508,10 @@ class ChatController extends ChangeNotifier {
         '${config.restBaseUrl}/api/conversations',
         queryParameters: {
           'limit': 100,
-          if (query.trim().isNotEmpty) 'q': query.trim(),
+          if (_conversationQuery.isNotEmpty) 'q': _conversationQuery,
         },
       );
+      if (_disposed || generation != _conversationSearchGeneration) return;
       final rows = (response.data as List?) ?? const [];
       conversations
         ..clear()
@@ -497,10 +522,14 @@ class ChatController extends ChangeNotifier {
               .where((c) => c.id.isNotEmpty),
         );
     } catch (_) {
-      conversationsError = '会话列表暂时无法加载';
+      if (!_disposed && generation == _conversationSearchGeneration) {
+        conversationsError = '会话列表暂时无法加载，请检查连接后重试';
+      }
     } finally {
-      conversationsLoading = false;
-      notifyListeners();
+      if (!_disposed && generation == _conversationSearchGeneration) {
+        conversationsLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -513,6 +542,8 @@ class ChatController extends ChangeNotifier {
     await player.interrupt();
     config.lastConversationId = '';
     conversationVersion++;
+    historyLoading = false;
+    historyError = '';
     _historyLoaded = false;
     lines.clear();
     partialText = miruText = toolStatus = progressStatus = pendingInput = '';
@@ -539,6 +570,8 @@ class ChatController extends ChangeNotifier {
     }
     config.lastConversationId = conversationId;
     conversationVersion++;
+    historyLoading = false;
+    historyError = '';
     pendingInput = '';
     pendingInputVersion++;
     pendingAttachments.clear();
@@ -958,6 +991,11 @@ class ChatController extends ChangeNotifier {
   }
 
   Future<bool> sendText(String text) async {
+    // Keyboard submission and rapid taps must obey the same guard as the UI.
+    if (_disposed ||
+        phase != ChatPhase.idle ||
+        attachmentUploading ||
+        historyLoading) return false;
     final value = text.trim();
     if (value.isEmpty) {
       if (pendingAttachments.isNotEmpty) {
@@ -988,8 +1026,19 @@ class ChatController extends ChangeNotifier {
 
   Future<void> interrupt() async {
     ws.sendJson({'type': 'interrupt'});
-    await player.interrupt();
+    if (miruText.isNotEmpty) {
+      lines.add(ChatLine('miru', miruText,
+          turnId: activeTurnId,
+          steps: List<ProcessStep>.from(activeProcessSteps),
+          stats: TurnStats(
+              status: 'interrupted',
+              durationMs: 0,
+              promptTokens: 0,
+              completionTokens: 0,
+              costRmb: 0)));
+    }
     miruText = '';
+    await player.interrupt();
     toolStatus = '';
     progressStatus = '';
     _resetActiveTurn();

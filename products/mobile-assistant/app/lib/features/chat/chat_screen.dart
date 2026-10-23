@@ -4,8 +4,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/audio/player_service.dart';
+import '../../core/design/miru_theme.dart';
+import '../../core/design/miru_widgets.dart';
 import 'chat_controller.dart';
 import 'conversation_drawer.dart';
+import 'message_content.dart';
+import '../finance/finance_screen.dart';
 import '../settings/settings_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -24,6 +28,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _textCtrl = TextEditingController();
   final ImagePicker _imagePicker = ImagePicker();
   final ScrollController _scroll = ScrollController();
+  final FocusNode _inputFocus = FocusNode();
+  bool _sending = false;
   bool _awayFromLatest = false;
   int _conversationVersion = -1;
   bool _holding = false;
@@ -44,6 +50,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _textCtrl.dispose();
+    _inputFocus.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -69,8 +76,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _scrollToLatest() {
     if (_scroll.hasClients) {
-      _scroll.animateTo(0,
-          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+      if (MediaQuery.disableAnimationsOf(context)) {
+        _scroll.jumpTo(0);
+      } else {
+        _scroll.animateTo(0,
+            duration: MiruMotion.duration(context), curve: Curves.easeOut);
+      }
     }
   }
 
@@ -89,10 +100,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _send() async {
+    if (!_textCtrl.value.composing.isCollapsed) return;
+    if (_sending || c.phase != ChatPhase.idle || c.attachmentUploading) return;
     final text = _textCtrl.text.trim();
-    if (text.isEmpty && c.pendingAttachments.isEmpty) return;
-    if (await c.sendText(text)) {
-      _textCtrl.clear();
+    if (text.isEmpty) return;
+    _sending = true;
+    try {
+      if (await c.sendText(text)) {
+        if (mounted && _textCtrl.text.trim() == text) _textCtrl.clear();
+        if (mounted) _scrollToLatest();
+      }
+    } finally {
+      _sending = false;
     }
   }
 
@@ -140,38 +159,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _pickImage(ImageSource source) async {
-    // 不限制宽高，且使用插件支持的最高质量；避免此前 92% 质量造成的细节损失。
-    final image = await _imagePicker.pickImage(
-      source: source,
-      imageQuality: 100,
-    );
-    if (image != null)
-      await c.uploadAttachment(image.path, filename: image.name);
+    try {
+      final image =
+          await _imagePicker.pickImage(source: source, imageQuality: 100);
+      if (image != null && mounted) {
+        await c.uploadAttachment(image.path, filename: image.name);
+      }
+    } catch (_) {
+      _pickerError('暂时无法打开照片，请检查相机或相册权限。');
+    }
   }
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const [
-        'jpg',
-        'jpeg',
-        'png',
-        'gif',
-        'webp',
-        'pdf',
-        'docx',
-        'xlsx',
-        'xls',
-        'csv',
-        'pptx',
-        'txt',
-        'md',
-      ],
-    );
-    final file =
-        (result != null && result.files.isNotEmpty) ? result.files.first : null;
-    if (file?.path != null)
-      await c.uploadAttachment(file!.path!, filename: file.name);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const [
+          'jpg',
+          'jpeg',
+          'png',
+          'gif',
+          'webp',
+          'pdf',
+          'docx',
+          'xlsx',
+          'xls',
+          'csv',
+          'pptx',
+          'txt',
+          'md',
+        ],
+      );
+      final file = (result != null && result.files.isNotEmpty)
+          ? result.files.first
+          : null;
+      if (file?.path != null && mounted) {
+        await c.uploadAttachment(file!.path!, filename: file.name);
+      }
+    } catch (_) {
+      _pickerError('暂时无法选择文件，请重试。');
+    }
+  }
+
+  void _pickerError(String message) {
+    if (mounted)
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// 手指抬起：上滑超过阈值则放弃，否则结束并提交录音。
@@ -209,97 +242,204 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      drawer: ConversationDrawer(controller: c),
-      appBar: AppBar(
-        title: const Text('Miru'),
-        actions: [
-          if (c.lastCost > 0)
-            Center(
-              child: Text(
-                '本轮 ¥${c.lastCost.toStringAsFixed(3)}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+    return AnimatedBuilder(
+      animation: c,
+      builder: (context, _) {
+        _syncPendingInput();
+        if (_conversationVersion != c.conversationVersion) {
+          _conversationVersion = c.conversationVersion;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
+          });
+        }
+        return LayoutBuilder(builder: (context, constraints) {
+          final wide = constraints.maxWidth >= MiruSpacing.wideBreakpoint;
+          final page = Scaffold(
+            drawer: wide
+                ? null
+                : ConversationDrawer(
+                    controller: c, onSettings: () => _openSettings(context)),
+            appBar: AppBar(
+              leading: wide
+                  ? null
+                  : Builder(
+                      builder: (context) => IconButton(
+                            tooltip: '打开导航',
+                            onPressed: () => Scaffold.of(context).openDrawer(),
+                            icon: const Icon(Icons.menu_rounded),
+                          )),
+              title: Row(mainAxisSize: MainAxisSize.min, children: [
+                const MiruBrandMark(size: 30),
+                const SizedBox(width: 10),
+                const Flexible(
+                    child: Text('Miru', overflow: TextOverflow.ellipsis)),
+              ]),
+              actions: [
+                IconButton(
+                  tooltip: c.config.ttsEnabled ? '关闭语音回复' : '开启语音回复',
+                  icon: Icon(c.config.ttsEnabled
+                      ? Icons.volume_up_outlined
+                      : Icons.volume_off_outlined),
+                  onPressed: c.phase == ChatPhase.idle ? c.toggleTts : null,
+                ),
+                IconButton(
+                    tooltip: '新对话',
+                    onPressed:
+                        c.attachmentUploading ? null : c.createConversation,
+                    icon: const Icon(Icons.edit_square)),
+                IconButton(
+                    tooltip: '设置',
+                    icon: const Icon(Icons.tune_rounded),
+                    onPressed: () => _openSettings(context)),
+                const SizedBox(width: 4),
+              ],
             ),
-          // 语音回复快捷开关
-          IconButton(
-            tooltip: c.config.ttsEnabled ? '关闭语音回复' : '开启语音回复',
-            icon: Icon(
-              c.config.ttsEnabled
-                  ? Icons.volume_up_outlined
-                  : Icons.volume_off_outlined,
-            ),
-            onPressed: c.toggleTts,
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => _openSettings(context),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: AnimatedBuilder(
-        animation: c,
-        builder: (context, _) {
-          _syncPendingInput();
-          if (_conversationVersion != c.conversationVersion) {
-            _conversationVersion = c.conversationVersion;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
-            });
-          }
-          return Column(
-            children: [
-              if (!c.wsConnected) _offlineBanner(context),
-              if (c.wsConnected && c.systemStatus != null)
-                _systemStatusBanner(context),
-              Expanded(
-                child: Stack(children: [
-                  Positioned.fill(
-                    // 点聊天区域收键盘；拖动列表滚动也收键盘
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: () => FocusScope.of(context).unfocus(),
-                      child: ListView.builder(
-                        controller: _scroll,
-                        reverse: true,
-                        keyboardDismissBehavior:
-                            ScrollViewKeyboardDismissBehavior.onDrag,
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                        itemCount: c.lines.length + 1,
-                        itemBuilder: (context, i) {
-                          if (i == 0) return _liveArea();
-                          final line = c.lines[c.lines.length - i];
-                          return _messageBubble(line);
-                        },
-                      ),
+            body: SafeArea(
+                top: false,
+                bottom: false,
+                child: Column(children: [
+                  if (!c.wsConnected) _offlineBanner(context),
+                  if (c.wsConnected && c.systemStatus != null)
+                    _systemStatusBanner(context),
+                  if (c.historyLoading)
+                    const LinearProgressIndicator(
+                        minHeight: 2, semanticsLabel: '正在加载对话'),
+                  if (c.historyError.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Row(children: [
+                        Expanded(
+                            child: Text(c.historyError,
+                                style: Theme.of(context).textTheme.bodySmall)),
+                        TextButton(
+                            onPressed: c.retryHistory, child: const Text('重试'))
+                      ]),
                     ),
-                  ),
-                  if (_awayFromLatest)
-                    Positioned(
-                        right: 16,
-                        bottom: 12,
-                        child: FloatingActionButton.small(
-                          heroTag: 'latest-message',
-                          tooltip: '回到最新消息',
-                          onPressed: _scrollToLatest,
-                          child: const Icon(Icons.arrow_downward),
-                        )),
-                  if (c.lines.isEmpty &&
-                      c.miruText.isEmpty &&
-                      c.phase == ChatPhase.idle)
-                    const Center(
-                        child:
-                            Text('新对话\n今天想聊些什么？', textAlign: TextAlign.center)),
-                ]),
-              ),
-              _bottomBar(context),
-            ],
+                  Expanded(child: LayoutBuilder(builder: (context, bounds) {
+                    final gutter =
+                        ((bounds.maxWidth - MiruSpacing.contentWidth) / 2)
+                            .clamp(16.0, double.infinity);
+                    return Stack(children: [
+                      Positioned.fill(
+                          child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: () => FocusScope.of(context).unfocus(),
+                        child: ListView.builder(
+                          key: const ValueKey('conversation-messages'),
+                          controller: _scroll,
+                          reverse: true,
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: EdgeInsets.fromLTRB(gutter, 16, gutter, 20),
+                          itemCount: c.lines.length + 1,
+                          itemBuilder: (context, i) => i == 0
+                              ? _liveArea()
+                              : _messageBubble(c.lines[c.lines.length - i]),
+                        ),
+                      )),
+                      if (c.lines.isEmpty &&
+                          c.miruText.isEmpty &&
+                          c.phase == ChatPhase.idle &&
+                          !c.historyLoading)
+                        Positioned.fill(child: _welcome()),
+                      if (_awayFromLatest)
+                        Positioned(
+                            right: gutter,
+                            bottom: 12,
+                            child: FloatingActionButton.small(
+                              heroTag: 'latest-message',
+                              tooltip: '回到最新消息',
+                              onPressed: _scrollToLatest,
+                              child: const Icon(Icons.arrow_downward),
+                            )),
+                    ]);
+                  })),
+                  MiruPageBody(child: _bottomBar(context)),
+                ])),
           );
-        },
-      ),
+          if (!wide) return page;
+          return Row(children: [
+            SizedBox(
+                width: 288,
+                child: ConversationDrawer(
+                    controller: c,
+                    embedded: true,
+                    onSettings: () => _openSettings(context))),
+            const VerticalDivider(width: 1),
+            Expanded(child: page),
+          ]);
+        });
+      },
     );
   }
+
+  Widget _welcome() {
+    final theme = Theme.of(context);
+    return LayoutBuilder(
+        builder: (context, bounds) => SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                    minHeight:
+                        (bounds.maxHeight - 48).clamp(0.0, double.infinity)),
+                child: Center(
+                    child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 440),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const MiruBrandMark(size: 56),
+                            const SizedBox(height: 24),
+                            Text('把想法说给 Miru',
+                                style: theme.textTheme.headlineLarge),
+                            const SizedBox(height: 10),
+                            Text('一起理清思路，也照顾好日常。',
+                                style: theme.textTheme.bodyLarge?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant)),
+                            const SizedBox(height: 28),
+                            _starter(Icons.lightbulb_outline_rounded, '一起想一想',
+                                '帮我梳理一下这个想法：'),
+                            const SizedBox(height: 10),
+                            _starter(Icons.description_outlined, '读懂一份资料',
+                                '请帮我总结这份资料的重点：'),
+                            const SizedBox(height: 10),
+                            Card(
+                                child: ListTile(
+                              leading: Icon(
+                                  Icons.account_balance_wallet_outlined,
+                                  color: theme.colorScheme.primary),
+                              title: const Text('看看我的账本'),
+                              trailing: const Icon(Icons.arrow_forward_rounded,
+                                  size: 18),
+                              onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute<void>(
+                                      builder: (_) =>
+                                          FinanceScreen(config: c.config))),
+                            )),
+                            const SizedBox(height: 20),
+                            Text('输入文字，或按住下方按钮说话',
+                                style: theme.textTheme.bodySmall),
+                          ],
+                        ))),
+              ),
+            ));
+  }
+
+  Widget _starter(IconData icon, String title, String prompt) => Card(
+        child: ListTile(
+          leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
+          title: Text(title),
+          trailing: const Icon(Icons.north_west_rounded, size: 18),
+          onTap: () {
+            _textCtrl.text = prompt;
+            _textCtrl.selection =
+                TextSelection.collapsed(offset: prompt.length);
+            _inputFocus.requestFocus();
+          },
+        ),
+      );
 
   /// 未连接服务器时的顶部横幅：点按直接进设置
   Widget _offlineBanner(BuildContext context) {
@@ -349,7 +489,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     }
     if (c.miruText.isNotEmpty) {
-      parts.add(Text(c.miruText, style: const TextStyle(fontSize: 15)));
+      parts.add(MessageContent(text: c.miruText));
     }
     if (c.toolStatus.isNotEmpty) {
       parts.add(
@@ -363,7 +503,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
               const SizedBox(width: 8),
-              Text(c.toolStatus, style: const TextStyle(fontSize: 13)),
+              Expanded(
+                  child: Text(c.toolStatus,
+                      style: Theme.of(context).textTheme.bodySmall)),
             ],
           ),
         ),
@@ -392,22 +534,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
               const SizedBox(width: 8),
-              Text(
+              Expanded(
+                  child: Text(
                 c.progressStatus.isEmpty ? '正在处理…' : c.progressStatus,
                 style: TextStyle(
                   fontSize: 13,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-              ),
+              )),
             ],
           ),
         ),
       );
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: parts,
-    );
+    if (parts.isEmpty) return const SizedBox.shrink();
+    return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(children: [
+                  const MiruBrandMark(size: 24),
+                  const SizedBox(width: 8),
+                  Text('Miru', style: Theme.of(context).textTheme.labelLarge)
+                ])),
+            ...parts,
+          ],
+        ));
   }
 
   Widget _systemStatusBanner(BuildContext context) {
@@ -428,8 +583,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                '${status.cloudLabel} · ${status.homeNodeLabel}'
-                '${stale ? ' · 状态待刷新' : ''}',
+                '${status.cloudOnline ? '云端已连接' : '云端暂不可用'} · ${status.homeNodeOnline ? '家庭节点在线' : '家庭节点未连接'}'
+                '${stale ? ' · 状态待刷新' : ''}'
+                '${c.lastCost > 0 ? ' · 本轮 ¥${c.lastCost.toStringAsFixed(3)}' : ''}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -445,121 +601,142 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final isNote = line.kind == 'note';
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
-        decoration: BoxDecoration(
-          color: isUser
-              ? scheme.primaryContainer
-              : isNote
-                  ? scheme.surfaceContainerHighest
-                  : scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+      child: FractionallySizedBox(
+          widthFactor: isUser ? .9 : 1,
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 10),
+            padding: EdgeInsets.all(isUser || isNote ? 16 : 4),
+            decoration: BoxDecoration(
+              color: isUser
+                  ? scheme.primaryContainer
+                  : isNote
+                      ? scheme.surfaceContainerHighest
+                      : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: line.text.isEmpty
-                      ? const SizedBox.shrink()
-                      : SelectableText(
-                          line.text,
-                          style: const TextStyle(fontSize: 15),
-                        ),
+                if (!isNote)
+                  Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(children: [
+                        if (!isUser) ...[
+                          const MiruBrandMark(size: 24),
+                          const SizedBox(width: 8)
+                        ],
+                        Text(isUser ? '你' : 'Miru',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(color: scheme.onSurfaceVariant)),
+                      ])),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: line.text.isEmpty
+                          ? const SizedBox.shrink()
+                          : isUser || isNote
+                              ? SelectableText(line.text,
+                                  style: Theme.of(context).textTheme.bodyLarge)
+                              : MessageContent(text: line.text),
+                    ),
+                  ],
                 ),
-                if (isUser || line.kind == 'miru')
-                  IconButton(
-                    tooltip: '复制',
-                    visualDensity: VisualDensity.compact,
-                    iconSize: 18,
-                    icon: const Icon(Icons.copy_outlined),
-                    onPressed: () => _copyText(line.text),
-                  ),
-              ],
-            ),
-            if (line.images.isNotEmpty)
-              ...line.images.map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(top: 8, right: 6),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      GestureDetector(
-                        onTap: () => _openRemoteImage(item),
-                        child: Stack(
-                          alignment: Alignment.bottomRight,
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: Image.network(
-                                '${c.config.restBaseUrl}${item.downloadPath}',
-                                headers: {
-                                  'Authorization': 'Bearer ${c.config.token}',
-                                },
-                                fit: BoxFit.contain,
-                                loadingBuilder: (context, child, progress) =>
-                                    progress == null
-                                        ? child
-                                        : const SizedBox(
-                                            height: 120,
-                                            child: Center(
-                                              child:
-                                                  CircularProgressIndicator(),
-                                            ),
-                                          ),
-                                errorBuilder: (context, error, stackTrace) =>
-                                    const SizedBox(
-                                  height: 90,
-                                  child: Center(
-                                    child: Text('原图已过期或暂时无法加载'),
+                if (line.images.isNotEmpty)
+                  ...line.images.map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(top: 8, right: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          GestureDetector(
+                            onTap: () => _openRemoteImage(item),
+                            child: Stack(
+                              alignment: Alignment.bottomRight,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: Image.network(
+                                    '${c.config.restBaseUrl}${item.downloadPath}',
+                                    headers: {
+                                      'Authorization':
+                                          'Bearer ${c.config.token}',
+                                    },
+                                    fit: BoxFit.contain,
+                                    loadingBuilder:
+                                        (context, child, progress) =>
+                                            progress == null
+                                                ? child
+                                                : const SizedBox(
+                                                    height: 120,
+                                                    child: Center(
+                                                      child:
+                                                          CircularProgressIndicator(),
+                                                    ),
+                                                  ),
+                                    errorBuilder:
+                                        (context, error, stackTrace) =>
+                                            const SizedBox(
+                                      height: 90,
+                                      child: Center(
+                                        child: Text('原图已过期或暂时无法加载'),
+                                      ),
+                                    ),
                                   ),
+                                ),
+                                const Padding(
+                                  padding: EdgeInsets.all(8),
+                                  child: CircleAvatar(
+                                    radius: 16,
+                                    child: Icon(Icons.open_in_full, size: 17),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (item.sender.isNotEmpty ||
+                              item.messageTime.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                [item.sender, item.messageTime]
+                                    .where((value) => value.isNotEmpty)
+                                    .join(' · '),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: scheme.onSurfaceVariant,
                                 ),
                               ),
                             ),
-                            const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: CircleAvatar(
-                                radius: 16,
-                                child: Icon(Icons.open_in_full, size: 17),
-                              ),
-                            ),
-                          ],
-                        ),
+                        ],
                       ),
-                      if (item.sender.isNotEmpty || item.messageTime.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            [item.sender, item.messageTime]
-                                .where((value) => value.isNotEmpty)
-                                .join(' · '),
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-            if (line.kind == 'miru' && line.steps.isNotEmpty)
-              _processPanel(
-                line.steps,
-                expanded: line.processExpanded,
-                onToggle: () {
-                  line.processExpanded = !line.processExpanded;
-                  setState(() {});
-                },
-              ),
-            if (line.kind == 'miru' && line.stats != null)
-              _completionMeta(line.stats!),
-          ],
-        ),
-      ),
+                if (line.kind == 'miru' && line.steps.isNotEmpty)
+                  _processPanel(
+                    line.steps,
+                    expanded: line.processExpanded,
+                    onToggle: () {
+                      line.processExpanded = !line.processExpanded;
+                      setState(() {});
+                    },
+                  ),
+                if (line.kind == 'miru' && line.stats != null)
+                  _completionMeta(line.stats!),
+                if (isUser || line.kind == 'miru')
+                  Align(
+                      alignment: Alignment.centerLeft,
+                      child: IconButton(
+                        tooltip: '复制',
+                        iconSize: 18,
+                        icon: const Icon(Icons.copy_outlined),
+                        onPressed: () => _copyText(line.text),
+                      )),
+              ],
+            ),
+          )),
     );
   }
 
@@ -567,7 +744,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final completed = stats.status == 'completed';
     final seconds = stats.durationMs <= 0 ? 0 : stats.durationMs / 1000;
     final parts = <String>[
-      completed ? '本轮已完成' : '本轮未完成',
+      completed
+          ? '已完成'
+          : stats.status == 'interrupted'
+              ? '已停止'
+              : '本轮未完成',
       if (stats.durationMs > 0) '${seconds.toStringAsFixed(1)} 秒',
       if (stats.completionTokens > 0) '生成 ${stats.completionTokens} tokens',
       if (stats.costRmb > 0) '¥${stats.costRmb.toStringAsFixed(3)}',
@@ -587,7 +768,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           Expanded(
             child: Text(
               parts.join(' · '),
-              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -624,14 +804,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         : Icons.keyboard_arrow_right,
                     size: 18,
                   ),
-                  Text(
+                  Flexible(
+                      child: Text(
                     '处理过程（${steps.length} 个步骤）',
                     style: TextStyle(
                       fontSize: 12,
                       color: scheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
                     ),
-                  ),
+                  )),
                   IconButton(
                     tooltip: '复制处理过程',
                     visualDensity: VisualDensity.compact,
@@ -711,186 +892,271 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       .join('\n');
 
   Widget _bottomBar(BuildContext context) {
-    final thinking = c.phase == ChatPhase.thinking;
-    final speaking = c.phase == ChatPhase.speaking;
+    final colors = Theme.of(context).colorScheme;
+    final busy = c.phase == ChatPhase.thinking || c.phase == ChatPhase.speaking;
     final listening = c.phase == ChatPhase.listening;
-
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(children: [
-              const Text('思考等级'),
-              const SizedBox(width: 12),
-              ChoiceChip(
-                  label: const Text('低'),
-                  selected: c.config.thinkingLevel == 'low',
-                  tooltip: '正常回答，节省消耗',
-                  onSelected:
-                      listening ? null : (_) => c.setThinkingLevel('low')),
-              const SizedBox(width: 8),
-              ChoiceChip(
-                  label: const Text('高'),
-                  selected: c.config.thinkingLevel == 'high',
-                  tooltip: '深入思考，详细分析',
-                  onSelected:
-                      listening ? null : (_) => c.setThinkingLevel('high')),
-              const Spacer(),
-              IconButton(
-                  tooltip: '新对话',
-                  onPressed: listening ? null : c.createConversation,
-                  icon: const Icon(Icons.edit_square)),
-            ]),
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
             if (c.pendingAttachments.isNotEmpty || c.attachmentUploading)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      ...c.pendingAttachments.map(
-                        (item) => InputChip(
+              SizedBox(
+                height: 52,
+                child: ListView(scrollDirection: Axis.horizontal, children: [
+                  ...c.pendingAttachments.map((item) => Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: InputChip(
                           avatar: Icon(
-                            item.kind == 'image'
-                                ? Icons.image_outlined
-                                : Icons.attach_file,
-                            size: 18,
-                          ),
+                              item.kind == 'image'
+                                  ? Icons.image_outlined
+                                  : Icons.attach_file,
+                              size: 18),
                           label: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 180),
-                            child: Text(
-                              item.filename,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          onDeleted: () => c.removePendingAttachment(item.id),
+                              constraints: const BoxConstraints(maxWidth: 160),
+                              child: Text(item.filename,
+                                  overflow: TextOverflow.ellipsis)),
+                          onDeleted: listening
+                              ? null
+                              : () => c.removePendingAttachment(item.id),
                         ),
-                      ),
-                      if (c.attachmentUploading)
-                        const Chip(
-                          avatar: SizedBox(
+                      )),
+                  if (c.attachmentUploading)
+                    const Chip(
+                        label: Text('上传中…'),
+                        avatar: SizedBox(
                             width: 14,
                             height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          label: Text('上传中…'),
-                        ),
-                    ],
+                            child: CircularProgressIndicator(strokeWidth: 2))),
+                ]),
+              ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                  color: colors.surfaceContainerLowest,
+                  border: Border.all(
+                      color:
+                          listening ? colors.primary : colors.outlineVariant),
+                  borderRadius: BorderRadius.circular(24)),
+              child: Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    CallbackShortcuts(
+                      bindings: {
+                        const SingleActivator(LogicalKeyboardKey.enter,
+                            control: true): _send,
+                        const SingleActivator(LogicalKeyboardKey.enter,
+                            meta: true): _send
+                      },
+                      child: TextField(
+                        key: const ValueKey('chat-input'),
+                        controller: _textCtrl,
+                        focusNode: _inputFocus,
+                        minLines: 1,
+                        maxLines: 5,
+                        textInputAction: TextInputAction.newline,
+                        keyboardType: TextInputType.multiline,
+                        decoration: const InputDecoration(
+                            hintText: '想聊些什么？',
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            filled: false,
+                            contentPadding:
+                                EdgeInsets.fromLTRB(12, 10, 12, 10)),
+                      ),
+                    ),
+                    Row(children: [
+                      PopupMenuButton<String>(
+                        tooltip: '添加图片或文件',
+                        enabled: c.wsConnected &&
+                            !busy &&
+                            !listening &&
+                            !c.attachmentUploading,
+                        icon: const Icon(Icons.add_rounded),
+                        onSelected: (value) {
+                          if (value == 'camera') {
+                            _pickImage(ImageSource.camera);
+                          } else if (value == 'photos') {
+                            _pickImage(ImageSource.gallery);
+                          } else {
+                            _pickFile();
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'camera', child: Text('拍照')),
+                          PopupMenuItem(value: 'photos', child: Text('从相册选择')),
+                          PopupMenuItem(value: 'files', child: Text('选择文件或表格')),
+                        ],
+                      ),
+                      Expanded(
+                          child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                onPressed:
+                                    busy || listening ? null : _chooseThinking,
+                                style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10)),
+                                child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(
+                                          child: Text(
+                                              c.config.thinkingLevel == 'high'
+                                                  ? '深入思考'
+                                                  : '标准思考',
+                                              overflow: TextOverflow.ellipsis)),
+                                      const SizedBox(width: 2),
+                                      const Icon(Icons.expand_more_rounded,
+                                          size: 18),
+                                    ]),
+                              ))),
+                      ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _textCtrl,
+                          builder: (context, value, _) => IconButton.filled(
+                                tooltip: '发送消息',
+                                onPressed: value.text.trim().isEmpty ||
+                                        busy ||
+                                        listening ||
+                                        c.attachmentUploading ||
+                                        c.historyLoading
+                                    ? null
+                                    : _send,
+                                icon: const Icon(Icons.arrow_upward_rounded,
+                                    size: 22),
+                              )),
+                    ]),
+                  ])),
+            ),
+            const SizedBox(height: 8),
+            if (busy)
+              SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: c.interrupt,
+                    icon: const Icon(Icons.stop_circle_outlined, size: 20),
+                    label:
+                        Text(c.phase == ChatPhase.speaking ? '停止语音' : '停止生成'),
+                  ))
+            else
+              Semantics(
+                button: true,
+                label: listening ? '结束录音' : '语音输入',
+                hint: '按住说话，上滑取消。使用屏幕阅读器时双击开始或结束。',
+                onTap: !c.wsConnected || busy || c.attachmentUploading
+                    ? null
+                    : () {
+                        if (listening) {
+                          c.stopListening();
+                        } else {
+                          c.startListening();
+                        }
+                      },
+                child: Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: (event) {
+                    if (!c.wsConnected ||
+                        busy ||
+                        c.attachmentUploading ||
+                        c.historyLoading ||
+                        _holding) return;
+                    _holding = true;
+                    _cancelingVoice = false;
+                    _voicePointerStart = event.position;
+                    HapticFeedback.mediumImpact();
+                    c.startListening();
+                  },
+                  onPointerMove: _updateVoiceDrag,
+                  onPointerUp: (_) => _finishHold(),
+                  onPointerCancel: (_) => _cancelHold(),
+                  child: AnimatedContainer(
+                    duration: MiruMotion.duration(context),
+                    constraints: const BoxConstraints(minHeight: 48),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                        color: _cancelingVoice
+                            ? colors.errorContainer
+                            : listening
+                                ? colors.primaryContainer
+                                : colors.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(16)),
+                    child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                              listening
+                                  ? Icons.graphic_eq_rounded
+                                  : Icons.mic_none_rounded,
+                              size: 20,
+                              color: _cancelingVoice
+                                  ? colors.onErrorContainer
+                                  : colors.primary),
+                          const SizedBox(width: 8),
+                          Flexible(
+                              child: Text(
+                            listening
+                                ? (_cancelingVoice
+                                    ? '松开取消 · 下滑继续'
+                                    : (c.recordRemaining > 0 &&
+                                            c.recordRemaining <= 10
+                                        ? '上滑取消 · 还剩 ${c.recordRemaining}s'
+                                        : '上滑取消 · 松开发送'))
+                                : '按住说话',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelLarge
+                                ?.copyWith(
+                                    color: _cancelingVoice
+                                        ? colors.onErrorContainer
+                                        : c.wsConnected && !busy
+                                            ? colors.primary
+                                            : colors.onSurfaceVariant),
+                          )),
+                        ]),
                   ),
                 ),
               ),
-            // 输入行：识别文本可编辑，可打字发送
-            Row(
-              children: [
-                PopupMenuButton<String>(
-                  tooltip: '添加图片或文件',
-                  enabled: !thinking && !listening && !c.attachmentUploading,
-                  icon: const Icon(Icons.add_circle_outline),
-                  onSelected: (value) {
-                    if (value == 'camera') {
-                      _pickImage(ImageSource.camera);
-                    } else if (value == 'photos') {
-                      _pickImage(ImageSource.gallery);
-                    } else {
-                      _pickFile();
-                    }
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'camera', child: Text('拍照')),
-                    PopupMenuItem(value: 'photos', child: Text('从相册选择')),
-                    PopupMenuItem(value: 'files', child: Text('选择文件或表格')),
-                  ],
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _textCtrl,
-                    minLines: 1,
-                    maxLines: 3,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _send(),
-                    decoration: InputDecoration(
-                      hintText: '说话或输入…',
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
+          ]),
+        ));
+  }
+
+  Future<void> _chooseThinking() async {
+    await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) => SafeArea(
+                child: SingleChildScrollView(
+                    child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+              child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Text('选择思考方式',
+                            style: Theme.of(context).textTheme.titleLarge)),
+                    for (final level in ['low', 'high'])
+                      ListTile(
+                        leading: Icon(level == 'low'
+                            ? Icons.bolt_outlined
+                            : Icons.auto_awesome_outlined),
+                        title: Text(level == 'low' ? '标准思考' : '深入思考'),
+                        subtitle: Text(level == 'low'
+                            ? '适合日常问题，回应更轻快'
+                            : '适合复杂分析，可能需要更长时间与更多费用'),
+                        trailing: c.config.thinkingLevel == level
+                            ? const Icon(Icons.check_rounded)
+                            : null,
+                        onTap: () {
+                          c.setThinkingLevel(level);
+                          Navigator.pop(context);
+                        },
                       ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(22),
-                      ),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.send),
-                  onPressed: (thinking || listening || c.attachmentUploading)
-                      ? null
-                      : _send,
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            // 按住说话 + 打断
-            Row(
-              children: [
-                if (thinking || speaking)
-                  IconButton.filledTonal(
-                    icon: const Icon(Icons.stop),
-                    onPressed: c.interrupt,
-                  ),
-                Expanded(
-                  // 原始指针事件（不用 GestureDetector 长按）：按下立即开录，
-                  // 上滑进入取消区；系统取消手势时直接丢弃，避免误提交残音。
-                  child: Listener(
-                    behavior: HitTestBehavior.opaque,
-                    onPointerDown: (event) {
-                      _holding = true;
-                      _cancelingVoice = false;
-                      _voicePointerStart = event.position;
-                      HapticFeedback.mediumImpact();
-                      c.startListening();
-                    },
-                    onPointerMove: _updateVoiceDrag,
-                    onPointerUp: (_) => _finishHold(),
-                    onPointerCancel: (_) => _cancelHold(),
-                    child: Container(
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: listening || _cancelingVoice
-                            ? Theme.of(context).colorScheme.errorContainer
-                            : Theme.of(context).colorScheme.primary,
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: Center(
-                        child: Text(
-                          listening
-                              ? (_cancelingVoice
-                                  ? '松开取消 · 下滑继续'
-                                  : (c.recordRemaining > 0 &&
-                                          c.recordRemaining <= 10
-                                      ? '上滑取消 · 还剩 ${c.recordRemaining}s'
-                                      : '上滑取消 · 松开发送'))
-                              : '按住说话',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
+                  ]),
+            ))));
   }
 
   Future<void> _openSettings(BuildContext context) async {

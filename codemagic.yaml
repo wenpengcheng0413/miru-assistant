@@ -26,6 +26,8 @@ workflows:
           include: true
         - pattern: codex/cashew-finance-sync
           include: true
+        - pattern: codex/miru-ui-ipa-20261023
+          include: true
       tag_patterns:
         - pattern: ios-v*
           include: true
@@ -98,8 +100,8 @@ workflows:
           FLUTTER_APPLICATION_PATH=$PWD
           COCOAPODS_PARALLEL_CODE_SIGN=true
           FLUTTER_BUILD_DIR=build
-          FLUTTER_BUILD_NAME=0.3.6
-          FLUTTER_BUILD_NUMBER=9
+          FLUTTER_BUILD_NAME=0.4.0
+          FLUTTER_BUILD_NUMBER=10
           DART_DEFINES=$DART_DEFINES
           PACKAGE_CONFIG=$PWD/.dart_tool/package_config.json
           EOF
